@@ -5,8 +5,8 @@ import Link from "next/link";
 import { Send, CheckCircle2, AlertCircle, ArrowRight, Sparkles, RefreshCw } from "lucide-react";
 
 export default function PlaygroundPage() {
-  const [from, setFrom] = useState("Pitacs Notifications <noreply@pitacs.com>");
-  const [to, setTo] = useState("st@pitacs.com");
+  const [from, setFrom] = useState("Pitxmail <noreply@pitx.uk>");
+  const [to, setTo] = useState("standoh@pitacs.com");
   const [subject, setSubject] = useState("Overtime Claim Approval Notification - #OT-2026-904");
   const [html, setHtml] = useState(
     `<div style="font-family: sans-serif; max-width: 540px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 8px;">

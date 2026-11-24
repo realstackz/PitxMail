@@ -4,6 +4,18 @@
   "main": "worker/index.ts",
   "compatibility_date": "2026-01-01",
   "compatibility_flags": ["nodejs_compat"],
+  "routes": [
+    {
+      "pattern": "pitx.uk/*",
+      "zone_name": "pitx.uk",
+      "custom_domain": true
+    },
+    {
+      "pattern": "mail.pitx.uk/*",
+      "zone_name": "pitx.uk",
+      "custom_domain": true
+    }
+  ],
   "d1_databases": [
     {
       "binding": "DB",
@@ -13,7 +25,8 @@
   ],
   "send_email": [
     {
-      "name": "EMAIL"
+      "name": "EMAIL",
+      "allowed_sender_addresses": ["*@pitx.uk", "*@pitacs.com"]
     }
   ],
   "observability": {
