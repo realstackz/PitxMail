@@ -23,6 +23,9 @@ importers:
       next:
         specifier: ^15.1.8
         version: 15.5.29(@types/node@22.20.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      nodemailer:
+        specifier: ^10.6.1
+        version: 10.6.1
       react:
         specifier: ^19.0.0
         version: 19.3.1
@@ -39,6 +42,9 @@ importers:
       '@types/node':
         specifier: ^22.13.4
         version: 22.20.5
+      '@types/nodemailer':
+        specifier: ^8.0.2
+        version: 8.0.2
       '@types/react':
         specifier: ^19.0.10
         version: 19.3.0
@@ -895,6 +901,9 @@ packages:
   '@types/node@22.20.5':
     resolution: {integrity: sha512-U2+DNr+wSjpsTS/wZGYHq7GcwfuSmKiKvoPvK22zwTlRhU91yOniN4qRR5KhIjvif7ysw/dz/hKmfDH0Ris4aA==}
 
+  '@types/nodemailer@8.0.2':
+    resolution: {integrity: sha512-c7M5ox8p0nEOfbJ2E9Qcmt8/QCu/VzsiAhzBiZbvky2PhKZDHpKB3sQHBM5MEZNkCfBOaS6S9//AGPRTNB7IaA==}
+
   '@types/react-dom@19.3.0':
     resolution: {integrity: sha512-ZI7bU42mZXXKHn/qNLEw2IrbiINU7X5+vfgdixBHkCNpYWXjKgfQ/P+uyGb5CjOLB9UcnTeg3rylQtV2hym44Q==}
     peerDependencies:
@@ -1422,6 +1431,10 @@ packages:
   node-releases@2.0.65:
     resolution: {integrity: sha512-PfvofsGQ+MiOQIPkX9fU8ELUWmy5zL74CdQaph/ismKszfFkfwXaw0cGiwbwym2hT9k5+mdyl8O5WQ1MD8EHmA==}
     engines: {node: '>=18'}
+
+  nodemailer@10.6.1:
+    resolution: {integrity: sha512-d7kfFfS/tR4Aca+SBvRaQ+MXKNv7d2JiRe5TxaRcFT/kYMh4GGPnW9aKksTIEvyEbA7d/7HYWE4YPDEHxzJj/g==}
+    engines: {node: '>=20.0.0'}
 
   normalize-path@3.0.0:
     resolution: {integrity: sha512-6eZs5Ls3WtCisHWp9S2GUy8dqkpGi4BVSz3GaqiE6ezub0512ESztXUwUB6C6IKbQkY2Pnb/mD4WYojCRwcwLA==}
@@ -2255,6 +2268,10 @@ snapshots:
     dependencies:
       undici-types: 6.21.0
 
+  '@types/nodemailer@8.0.2':
+    dependencies:
+      '@types/node': 22.20.5
+
   '@types/react-dom@19.3.0(@types/react@19.3.0)':
     dependencies:
       '@types/react': 19.3.0
@@ -2750,6 +2767,8 @@ snapshots:
       formdata-polyfill: 4.0.10
 
   node-releases@2.0.65: {}
+
+  nodemailer@10.6.1: {}
 
   normalize-path@3.0.0: {}
 

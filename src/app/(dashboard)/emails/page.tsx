@@ -15,6 +15,9 @@ import {
   Eye,
   History,
   FileText,
+  Cloud,
+  Database,
+  HelpCircle,
 } from "lucide-react";
 
 interface EmailMessage {
@@ -33,6 +36,7 @@ interface EmailMessage {
   retryCount: number;
   createdAt: number;
   updatedAt: number;
+  isRemote?: boolean;
 }
 
 interface DeliveryAttempt {
@@ -51,6 +55,7 @@ export default function EmailsPage() {
   const [loading, setLoading] = useState(true);
   const [filterStatus, setFilterStatus] = useState("all");
   const [search, setSearch] = useState("");
+  const [dbSource, setDbSource] = useState<"cloudflare" | "local">("cloudflare");
 
   // Drawer detail state
   const [selectedEmail, setSelectedEmail] = useState<EmailMessage | null>(null);
@@ -62,14 +67,27 @@ export default function EmailsPage() {
   const loadEmails = async () => {
     try {
       setLoading(true);
+      const endpoint = dbSource === "cloudflare" ? "/api/v1/remote-emails" : "/api/v1/emails";
       const params = new URLSearchParams();
       if (filterStatus !== "all") params.append("status", filterStatus);
       if (search) params.append("search", search);
 
-      const res = await fetch(`/api/v1/emails?${params.toString()}`);
+      const res = await fetch(`${endpoint}?${params.toString()}`);
       if (res.ok) {
         const json = await res.json();
-        setEmails(json.data || []);
+        let items: EmailMessage[] = json.data || [];
+        if (filterStatus !== "all") {
+          items = items.filter((m) => m.status === filterStatus);
+        }
+        if (search) {
+          items = items.filter(
+            (m) =>
+              m.toAddress?.toLowerCase().includes(search.toLowerCase()) ||
+              m.subject?.toLowerCase().includes(search.toLowerCase()) ||
+              m.id?.toLowerCase().includes(search.toLowerCase())
+          );
+        }
+        setEmails(items);
       }
     } catch (err) {
       console.error("Failed to load emails", err);
@@ -80,12 +98,30 @@ export default function EmailsPage() {
 
   useEffect(() => {
     loadEmails();
-  }, [filterStatus]);
+  }, [filterStatus, dbSource]);
 
   const openDetail = async (email: EmailMessage) => {
     setSelectedEmail(email);
     setPreviewTab("preview");
     setLoadingDetail(true);
+
+    if (email.isRemote) {
+      // Create synthetic attempt from remote error data
+      setAttempts([
+        {
+          id: `att_${email.id}`,
+          attemptNumber: email.retryCount + 1,
+          provider: email.provider || "cloudflare_worker",
+          status: email.status === "failed" ? "failed" : "success",
+          errorMessage: email.errorReason,
+          startedAt: email.createdAt,
+          finishedAt: email.updatedAt,
+        },
+      ]);
+      setLoadingDetail(false);
+      return;
+    }
+
     try {
       const res = await fetch(`/api/v1/emails/${email.id}`);
       if (res.ok) {
@@ -100,20 +136,39 @@ export default function EmailsPage() {
     }
   };
 
-  const handleRetry = async (messageId: string) => {
+  const handleRetry = async (msg: EmailMessage) => {
     try {
       setRetrying(true);
-      const res = await fetch(`/api/v1/emails/${messageId}/retry`, {
-        method: "POST",
-      });
-      const data = await res.json();
 
-      if (res.ok) {
-        // Refresh email detail and table
-        await openDetail({ ...selectedEmail!, id: messageId });
+      if (msg.isRemote) {
+        // Re-dispatch to live Cloudflare Worker
+        const res = await fetch("https://pitxmail.pitacsdev.workers.dev/api/v1/emails", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            from: msg.fromAddress,
+            to: msg.toAddress,
+            subject: msg.subject,
+            html: msg.htmlBody,
+            text: msg.textBody,
+          }),
+        });
+
+        const data = await res.json();
+        alert(`Retry dispatched to Cloudflare Edge: Status = ${data.status || res.status}`);
         loadEmails();
       } else {
-        alert(`Retry failed: ${data.error || "Unknown error"}`);
+        const res = await fetch(`/api/v1/emails/${msg.id}/retry`, {
+          method: "POST",
+        });
+        const data = await res.json();
+
+        if (res.ok) {
+          await openDetail({ ...selectedEmail!, id: msg.id });
+          loadEmails();
+        } else {
+          alert(`Retry failed: ${data.error || "Unknown error"}`);
+        }
       }
     } catch (err: any) {
       alert(`Error during retry: ${err.message}`);
@@ -125,20 +180,49 @@ export default function EmailsPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-white">Outbound Emails</h1>
           <p className="text-sm text-slate-400 mt-1">
             Track message dispatch status, inspect payloads, and retry failed transmissions.
           </p>
         </div>
-        <button
-          onClick={loadEmails}
-          className="flex items-center space-x-2 px-3 py-2 bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300 rounded-lg text-sm transition"
-        >
-          <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-          <span>Refresh</span>
-        </button>
+
+        {/* Source Switcher */}
+        <div className="flex items-center space-x-2">
+          <div className="flex items-center p-1 bg-slate-900 border border-slate-800 rounded-lg text-xs">
+            <button
+              onClick={() => setDbSource("cloudflare")}
+              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-md font-medium transition ${
+                dbSource === "cloudflare"
+                  ? "bg-blue-600 text-white shadow-sm"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              <Cloud className="w-3.5 h-3.5 text-sky-300" />
+              <span>Cloudflare D1 Edge</span>
+            </button>
+            <button
+              onClick={() => setDbSource("local")}
+              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-md font-medium transition ${
+                dbSource === "local"
+                  ? "bg-blue-600 text-white shadow-sm"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              <Database className="w-3.5 h-3.5 text-emerald-300" />
+              <span>Local Sandbox DB</span>
+            </button>
+          </div>
+
+          <button
+            onClick={loadEmails}
+            className="p-2 bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300 rounded-lg text-sm transition"
+            title="Refresh"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+          </button>
+        </div>
       </div>
 
       {/* Filters and Search Bar */}
@@ -174,6 +258,25 @@ export default function EmailsPage() {
         </div>
       </div>
 
+      {/* Source Info Alert */}
+      <div className="flex items-center justify-between px-4 py-2.5 rounded-lg bg-slate-900/40 border border-slate-800/80 text-xs">
+        <div className="flex items-center space-x-2 text-slate-400">
+          <HelpCircle className="w-4 h-4 text-blue-400 shrink-0" />
+          <span>
+            Viewing:{" "}
+            <strong className="text-slate-200">
+              {dbSource === "cloudflare"
+                ? "Live Cloudflare D1 Database (pitxmail-db)"
+                : "Local Development Database"}
+            </strong>{" "}
+            ({emails.length} messages found)
+          </span>
+        </div>
+        <span className="text-[11px] font-mono text-slate-500">
+          {dbSource === "cloudflare" ? "pitxmail.pitacsdev.workers.dev" : "localhost:3000"}
+        </span>
+      </div>
+
       {/* Emails Table */}
       <div className="rounded-xl bg-slate-900/60 border border-slate-800 overflow-hidden">
         {loading ? (
@@ -184,9 +287,9 @@ export default function EmailsPage() {
         ) : emails.length === 0 ? (
           <div className="p-12 text-center">
             <Mail className="w-8 h-8 text-slate-600 mx-auto mb-2" />
-            <p className="text-sm text-slate-300 font-medium">No messages found</p>
+            <p className="text-sm text-slate-300 font-medium">No messages found in this database</p>
             <p className="text-xs text-slate-500 mt-1">
-              Try adjusting your filter or search query.
+              Try switching database source or adjusting your filter.
             </p>
           </div>
         ) : (
@@ -288,13 +391,18 @@ export default function EmailsPage() {
                   >
                     {selectedEmail.status}
                   </span>
+                  {selectedEmail.isRemote && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-400 border border-sky-500/20 font-mono">
+                      Cloudflare D1
+                    </span>
+                  )}
                 </div>
                 <h2 className="text-lg font-bold text-white mt-1">{selectedEmail.subject}</h2>
               </div>
               <div className="flex items-center space-x-2">
                 {/* Retry Button */}
                 <button
-                  onClick={() => handleRetry(selectedEmail.id)}
+                  onClick={() => handleRetry(selectedEmail)}
                   disabled={retrying}
                   className="flex items-center space-x-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-lg text-xs font-medium transition shadow-sm"
                 >
@@ -310,14 +418,33 @@ export default function EmailsPage() {
               </div>
             </div>
 
-            {/* Error Banner if Failed */}
+            {/* Error Diagnostics Banner if Failed */}
             {selectedEmail.errorReason && (
-              <div className="px-6 py-3 bg-rose-500/10 border-b border-rose-500/20 flex items-start space-x-2 text-xs text-rose-300">
-                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-                <div>
-                  <span className="font-semibold">Delivery Failure: </span>
-                  <span>{selectedEmail.errorReason}</span>
+              <div className="px-6 py-4 bg-rose-950/40 border-b border-rose-500/30 space-y-2">
+                <div className="flex items-start space-x-2 text-xs text-rose-300">
+                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-semibold block text-rose-200">Delivery Diagnostics:</span>
+                    <span className="text-slate-300 leading-relaxed">{selectedEmail.errorReason}</span>
+                  </div>
                 </div>
+
+                {selectedEmail.errorReason.includes("domain") && (
+                  <div className="pt-2 border-t border-rose-900/40 flex items-center justify-between text-xs">
+                    <span className="text-slate-400 text-[11px]">
+                      Tip: Add pitx.uk to your Cloudflare Dashboard under Websites.
+                    </span>
+                    <a
+                      href="https://dash.cloudflare.com/"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center space-x-1 text-blue-400 hover:text-blue-300 font-medium text-[11px]"
+                    >
+                      <span>Cloudflare Dashboard</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  </div>
+                )}
               </div>
             )}
 
@@ -326,7 +453,9 @@ export default function EmailsPage() {
               <div>
                 <span className="text-slate-500 block">From</span>
                 <span className="font-medium text-slate-200">
-                  {selectedEmail.fromName ? `${selectedEmail.fromName} <${selectedEmail.fromAddress}>` : selectedEmail.fromAddress}
+                  {selectedEmail.fromName
+                    ? `${selectedEmail.fromName} <${selectedEmail.fromAddress}>`
+                    : selectedEmail.fromAddress}
                 </span>
               </div>
               <div>

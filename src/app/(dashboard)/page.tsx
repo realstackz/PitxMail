@@ -47,19 +47,52 @@ export default function OverviewPage() {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [statsRes, emailsRes] = await Promise.all([
+      const [statsRes, emailsRes, remoteEmailsRes] = await Promise.all([
         fetch("/api/v1/stats"),
-        fetch("/api/v1/emails?limit=5"),
+        fetch("/api/v1/emails?limit=10"),
+        fetch("/api/v1/remote-emails?limit=10").catch(() => null),
       ]);
 
-      if (statsRes.ok) {
-        const statsJson = await statsRes.json();
-        setStats(statsJson);
-      }
+      let localItems: MessageItem[] = [];
+      let remoteItems: MessageItem[] = [];
 
       if (emailsRes.ok) {
         const emailsJson = await emailsRes.json();
-        setRecentEmails(emailsJson.data || []);
+        localItems = emailsJson.data || [];
+      }
+
+      if (remoteEmailsRes && remoteEmailsRes.ok) {
+        const remoteJson = await remoteEmailsRes.json();
+        remoteItems = remoteJson.data || [];
+      }
+
+      // Merge and sort by timestamp
+      const combined = [...localItems, ...remoteItems].sort(
+        (a, b) => b.createdAt - a.createdAt
+      );
+      setRecentEmails(combined.slice(0, 8));
+
+      if (statsRes.ok) {
+        const statsJson = await statsRes.json();
+        const remoteCount = remoteItems.length;
+        const remoteFailed = remoteItems.filter((m) => m.status === "failed").length;
+        const remoteDelivered = remoteItems.filter(
+          (m) => m.status === "delivered" || m.status === "submitted"
+        ).length;
+
+        const total = statsJson.total + remoteCount;
+        const delivered = statsJson.delivered + remoteDelivered;
+        const failed = statsJson.failed + remoteFailed;
+        const deliveryRate = total > 0 ? ((delivered / total) * 100).toFixed(1) : "100.0";
+
+        setStats({
+          total,
+          delivered,
+          failed,
+          accepted: statsJson.accepted,
+          deliveryRate: `${deliveryRate}%`,
+          volume24h: statsJson.volume24h + remoteCount,
+        });
       }
     } catch (err) {
       console.error("Failed to load dashboard data", err);

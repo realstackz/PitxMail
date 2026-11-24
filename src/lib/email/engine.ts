@@ -1,8 +1,9 @@
 import { db, initDb } from "@/lib/db";
 import { messages, deliveryAttempts, suppressions, idempotencyKeys } from "@/lib/db/schema";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { SendEmailRequest, OutboundEmailPayload, DeliveryResult, EmailProvider } from "./types";
 import { CloudflareEmailProvider } from "./providers/cloudflare";
+import { SmtpProvider } from "./providers/smtp";
 import { FallbackProvider } from "./providers/fallback";
 import { MockProvider } from "./providers/mock";
 import crypto from "crypto";
@@ -16,24 +17,36 @@ function parseEmailAddress(raw: string): { address: string; name?: string } {
   return { address: raw.trim().toLowerCase() };
 }
 
+function formatDiagnosticError(rawError: string | undefined): string | undefined {
+  if (!rawError) return undefined;
+  if (rawError.includes("domain was not found") || rawError.includes("could not find account config")) {
+    return "Cloudflare Domain Verification Pending: Domain must be added to your Cloudflare account to send outbound emails.";
+  }
+  if (rawError.includes("Missing domain or user") || rawError.includes("Invalid email address")) {
+    return "Invalid sender address format. Expected valid RFC5322 email like 'Sender <user@domain.com>'.";
+  }
+  return rawError;
+}
+
 export class EmailEngine {
   private providers: EmailProvider[];
 
   constructor() {
     this.providers = [
       new CloudflareEmailProvider(),
+      new SmtpProvider(),
       new FallbackProvider(),
       new MockProvider(),
     ];
   }
 
-  private getActiveProvider(): EmailProvider {
-    for (const provider of this.providers) {
-      if (provider.isConfigured()) {
-        return provider;
-      }
+  private getConfiguredProviders(): EmailProvider[] {
+    const configured = this.providers.filter((p) => p.isConfigured());
+    // If no real provider is configured, always include the MockProvider
+    if (configured.length === 0 || (configured.length === 1 && configured[0].name === "mock")) {
+      return [new MockProvider()];
     }
-    return new MockProvider();
+    return configured;
   }
 
   async sendEmail(
@@ -120,7 +133,6 @@ export class EmailEngine {
       updatedAt: now,
     });
 
-    // Save idempotency key if specified (valid for 24 hours)
     if (params.idempotencyKey) {
       const keyHash = crypto.createHash("sha256").update(params.idempotencyKey).digest("hex");
       const requestHash = crypto.createHash("sha256").update(JSON.stringify(params)).digest("hex");
@@ -133,8 +145,8 @@ export class EmailEngine {
       });
     }
 
-    // 4. Attempt Dispatch
-    const provider = this.getActiveProvider();
+    // 4. Cascade Dispatch Loop across Configured Providers
+    const providersToTry = this.getConfiguredProviders();
     const payload: OutboundEmailPayload = {
       id: messageId,
       from: fromAddr,
@@ -150,61 +162,78 @@ export class EmailEngine {
       metadata: params.metadata,
     };
 
-    const attemptId = `att_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`;
-    const startedAt = Date.now();
+    let finalResult: DeliveryResult = {
+      status: "failed",
+      provider: "none",
+      errorReason: "No delivery provider succeeded",
+    };
 
-    await db.insert(deliveryAttempts).values({
-      id: attemptId,
-      messageId,
-      attemptNumber: 1,
-      provider: provider.name,
-      status: "pending",
-      startedAt,
-    });
+    let attemptNumber = 1;
+    for (const provider of providersToTry) {
+      const attemptId = `att_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`;
+      const startedAt = Date.now();
 
-    let result: DeliveryResult;
-    try {
-      result = await provider.send(payload);
-    } catch (err: any) {
-      result = {
-        status: "failed",
+      await db.insert(deliveryAttempts).values({
+        id: attemptId,
+        messageId,
+        attemptNumber,
         provider: provider.name,
-        errorReason: err.message || "Unexpected dispatch error",
-        retryable: true,
-      };
+        status: "pending",
+        startedAt,
+      });
+
+      let res: DeliveryResult;
+      try {
+        res = await provider.send(payload);
+      } catch (err: any) {
+        res = {
+          status: "failed",
+          provider: provider.name,
+          errorReason: err.message || "Dispatch execution error",
+          retryable: true,
+        };
+      }
+
+      const finishedAt = Date.now();
+      const diagnostic = formatDiagnosticError(res.errorReason);
+
+      await db
+        .update(deliveryAttempts)
+        .set({
+          status: res.status === "failed" ? "failed" : "success",
+          errorMessage: diagnostic || null,
+          providerResponse: res.rawResponse || null,
+          finishedAt,
+        })
+        .where(eq(deliveryAttempts.id, attemptId));
+
+      finalResult = { ...res, errorReason: diagnostic };
+
+      if (res.status === "delivered" || res.status === "submitted") {
+        break;
+      }
+
+      attemptNumber++;
     }
 
-    const finishedAt = Date.now();
-
-    // 5. Update Delivery Attempt
-    await db
-      .update(deliveryAttempts)
-      .set({
-        status: result.status === "failed" ? "failed" : "success",
-        errorMessage: result.errorReason || null,
-        providerResponse: result.rawResponse || null,
-        finishedAt,
-      })
-      .where(eq(deliveryAttempts.id, attemptId));
-
-    // 6. Update Message Record
+    // 5. Update Final Status on Message Record
     await db
       .update(messages)
       .set({
-        status: result.status,
-        provider: result.provider,
-        providerMessageId: result.providerMessageId || null,
-        errorReason: result.errorReason || null,
-        deliveredAt: result.status === "delivered" ? finishedAt : null,
-        updatedAt: finishedAt,
+        status: finalResult.status,
+        provider: finalResult.provider,
+        providerMessageId: finalResult.providerMessageId || null,
+        errorReason: finalResult.errorReason || null,
+        deliveredAt: finalResult.status === "delivered" ? Date.now() : null,
+        updatedAt: Date.now(),
       })
       .where(eq(messages.id, messageId));
 
     return {
       messageId,
-      status: result.status,
-      provider: result.provider,
-      error: result.errorReason,
+      status: finalResult.status,
+      provider: finalResult.provider,
+      error: finalResult.errorReason,
     };
   }
 
@@ -223,7 +252,6 @@ export class EmailEngine {
 
     const msg = existing[0];
     const newRetryCount = msg.retryCount + 1;
-    const provider = this.getActiveProvider();
 
     const payload: OutboundEmailPayload = {
       id: msg.id,
@@ -240,59 +268,77 @@ export class EmailEngine {
       metadata: msg.metadata ? JSON.parse(msg.metadata) : undefined,
     };
 
-    const attemptId = `att_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`;
-    const startedAt = Date.now();
+    const providersToTry = this.getConfiguredProviders();
+    let finalResult: DeliveryResult = {
+      status: "failed",
+      provider: "none",
+      errorReason: "Retry failed across all providers",
+    };
 
-    await db.insert(deliveryAttempts).values({
-      id: attemptId,
-      messageId: msg.id,
-      attemptNumber: newRetryCount + 1,
-      provider: provider.name,
-      status: "pending",
-      startedAt,
-    });
+    let attemptNum = newRetryCount + 1;
+    for (const provider of providersToTry) {
+      const attemptId = `att_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`;
+      const startedAt = Date.now();
 
-    let result: DeliveryResult;
-    try {
-      result = await provider.send(payload);
-    } catch (err: any) {
-      result = {
-        status: "failed",
+      await db.insert(deliveryAttempts).values({
+        id: attemptId,
+        messageId: msg.id,
+        attemptNumber: attemptNum,
         provider: provider.name,
-        errorReason: err.message || "Retry delivery failed",
-        retryable: true,
-      };
+        status: "pending",
+        startedAt,
+      });
+
+      let res: DeliveryResult;
+      try {
+        res = await provider.send(payload);
+      } catch (err: any) {
+        res = {
+          status: "failed",
+          provider: provider.name,
+          errorReason: err.message || "Retry attempt failed",
+          retryable: true,
+        };
+      }
+
+      const finishedAt = Date.now();
+      const diagnostic = formatDiagnosticError(res.errorReason);
+
+      await db
+        .update(deliveryAttempts)
+        .set({
+          status: res.status === "failed" ? "failed" : "success",
+          errorMessage: diagnostic || null,
+          providerResponse: res.rawResponse || null,
+          finishedAt,
+        })
+        .where(eq(deliveryAttempts.id, attemptId));
+
+      finalResult = { ...res, errorReason: diagnostic };
+
+      if (res.status === "delivered" || res.status === "submitted") {
+        break;
+      }
+      attemptNum++;
     }
-
-    const finishedAt = Date.now();
-
-    await db
-      .update(deliveryAttempts)
-      .set({
-        status: result.status === "failed" ? "failed" : "success",
-        errorMessage: result.errorReason || null,
-        providerResponse: result.rawResponse || null,
-        finishedAt,
-      })
-      .where(eq(deliveryAttempts.id, attemptId));
 
     await db
       .update(messages)
       .set({
-        status: result.status,
-        provider: result.provider,
-        providerMessageId: result.providerMessageId || null,
-        errorReason: result.errorReason || null,
+        status: finalResult.status,
+        provider: finalResult.provider,
+        providerMessageId: finalResult.providerMessageId || null,
+        errorReason: finalResult.errorReason || null,
         retryCount: newRetryCount,
-        deliveredAt: result.status === "delivered" ? finishedAt : null,
-        updatedAt: finishedAt,
+        deliveredAt: finalResult.status === "delivered" ? Date.now() : null,
+        updatedAt: Date.now(),
       })
       .where(eq(messages.id, msg.id));
 
     return {
-      success: result.status !== "failed",
-      status: result.status,
-      error: result.errorReason,
+      success: finalResult.status !== "failed",
+      status: finalResult.status,
+      error: finalResult.errorReason,
     };
   }
 }
