@@ -105,25 +105,9 @@ export default function EmailsPage() {
     setPreviewTab("preview");
     setLoadingDetail(true);
 
-    if (email.isRemote) {
-      // Create synthetic attempt from remote error data
-      setAttempts([
-        {
-          id: `att_${email.id}`,
-          attemptNumber: email.retryCount + 1,
-          provider: email.provider || "cloudflare_worker",
-          status: email.status === "failed" ? "failed" : "success",
-          errorMessage: email.errorReason,
-          startedAt: email.createdAt,
-          finishedAt: email.updatedAt,
-        },
-      ]);
-      setLoadingDetail(false);
-      return;
-    }
-
+    const base = email.isRemote ? "/api/v1/remote-emails" : "/api/v1/emails";
     try {
-      const res = await fetch(`/api/v1/emails/${email.id}`);
+      const res = await fetch(`${base}/${encodeURIComponent(email.id)}`);
       if (res.ok) {
         const data = await res.json();
         setSelectedEmail(data.message);
@@ -139,36 +123,15 @@ export default function EmailsPage() {
   const handleRetry = async (msg: EmailMessage) => {
     try {
       setRetrying(true);
-
-      if (msg.isRemote) {
-        // Re-dispatch to live Cloudflare Worker
-        const res = await fetch("https://pitxmail.pitacsdev.workers.dev/api/v1/emails", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            from: msg.fromAddress,
-            to: msg.toAddress,
-            subject: msg.subject,
-            html: msg.htmlBody,
-            text: msg.textBody,
-          }),
-        });
-
+      const base = msg.isRemote ? "/api/v1/remote-emails" : "/api/v1/emails";
+      const res = await fetch(`${base}/${encodeURIComponent(msg.id)}/retry`, {
+        method: "POST",
+      });
+      await openDetail(msg);
+      loadEmails();
+      if (!res.ok) {
         const data = await res.json();
-        alert(`Retry dispatched to Cloudflare Edge: Status = ${data.status || res.status}`);
-        loadEmails();
-      } else {
-        const res = await fetch(`/api/v1/emails/${msg.id}/retry`, {
-          method: "POST",
-        });
-        const data = await res.json();
-
-        if (res.ok) {
-          await openDetail({ ...selectedEmail!, id: msg.id });
-          loadEmails();
-        } else {
-          alert(`Retry failed: ${data.error || "Unknown error"}`);
-        }
+        alert(`Retry attempt recorded (${data.status || "failed"}): ${data.error || "Unknown error"}`);
       }
     } catch (err: any) {
       alert(`Error during retry: ${err.message}`);

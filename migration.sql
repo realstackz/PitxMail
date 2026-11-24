@@ -54,4 +54,4 @@ INSERT OR IGNORE INTO projects (id, organisation_id, name, environment, created_
 VALUES ('proj_pitacs_hub', 'org_pitacs', 'Pitacs Hub', 'production', 1732445829104);
 
 INSERT OR IGNORE INTO domains (id, organisation_id, domain, verification_status, dkim_status, spf_status, dmarc_status, mx_status, created_at)
-VALUES ('dom_pitx_uk', 'org_pitacs', 'pitx.uk', 'verified', 'verified', 'verified', 'verified', 'verified', 1732445829104);
+VALUES ('dom_pitx_uk', 'org_pitacs', 'pitx.uk', 'pending', 'pending', 'pending', 'pending', 'pending', 1732445829104);

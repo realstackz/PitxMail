@@ -34,36 +34,37 @@ export async function POST(req: NextRequest) {
     const domainId = `dom_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`;
     const now = Date.now();
 
-    // Required DNS records template
+    // Cloudflare Email Sending requires the domain's DNS to be hosted on Cloudflare.
+    // Once it is, `wrangler email sending enable <domain>` creates the real SPF/DKIM/DMARC
+    // records automatically, so we don't hand out made-up values here.
     const dnsRecords = [
+      {
+        type: "NS",
+        name: rawDomain,
+        value: "Your two Cloudflare nameservers (*.ns.cloudflare.com), shown when you add the domain in the Cloudflare dashboard",
+        status: "pending",
+        record: "Nameservers",
+      },
       {
         type: "TXT",
         name: rawDomain,
-        value: "v=spf1 include:_spf.mx.cloudflare.net ~all",
+        value: "SPF: created automatically by Cloudflare Email Sending",
         status: "pending",
         record: "SPF",
       },
       {
         type: "TXT",
-        name: `cf._domainkey.${rawDomain}`,
-        value: `v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC3${crypto.randomBytes(16).toString("hex")}`,
+        name: `cf2024-1._domainkey.${rawDomain}`,
+        value: "DKIM: created automatically by Cloudflare Email Sending",
         status: "pending",
         record: "DKIM",
       },
       {
         type: "TXT",
         name: `_dmarc.${rawDomain}`,
-        value: `v=DMARC1; p=none; rua=mailto:dmarc@${rawDomain}`,
+        value: "DMARC: exactly one record (Cloudflare can create it; remove any duplicates)",
         status: "pending",
         record: "DMARC",
-      },
-      {
-        type: "MX",
-        name: rawDomain,
-        value: "route1.mx.cloudflare.net",
-        priority: 10,
-        status: "pending",
-        record: "MX",
       },
     ];
 

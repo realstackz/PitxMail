@@ -111,10 +111,10 @@ VALUES (
   'proj_pitacs_hub',
   'Default Pitacs Hub Key',
   'pm_live_def...',
-  '5a73099951664bf87515eb07e4d5fb84d12c85f79a9634d0b0b8c66e408ecbb7',
+  '71997f1c700ef4c931ef9cc477094f68596f9fcbab2a9702419cec1e443c2e36',
   'emails:send,emails:read',
   1732445829104
 );
 
 INSERT OR IGNORE INTO domains (id, organisation_id, domain, verification_status, dkim_status, spf_status, dmarc_status, mx_status, created_at)
-VALUES ('dom_pitx_uk', 'org_pitacs', 'pitx.uk', 'verified', 'verified', 'verified', 'verified', 'verified', 1732445829104);
+VALUES ('dom_pitx_uk', 'org_pitacs', 'pitx.uk', 'pending', 'pending', 'pending', 'pending', 'pending', 1732445829104);

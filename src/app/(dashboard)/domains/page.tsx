@@ -93,11 +93,12 @@ export default function DomainsPage() {
     setVerifyingId(id);
     try {
       const res = await fetch(`/api/v1/domains/${id}/verify`, { method: "POST" });
-      if (res.ok) {
-        await loadDomains();
-      } else {
-        const err = await res.json();
-        alert(err.error || "Verification failed");
+      const data = await res.json();
+      await loadDomains();
+      if (!res.ok) {
+        alert(data.error || "Verification failed");
+      } else if (!data.success) {
+        alert(`Not ready to send yet:\n\n- ${(data.issues || []).join("\n- ")}`);
       }
     } catch (err: any) {
       alert(err.message);
@@ -184,21 +185,21 @@ export default function DomainsPage() {
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs pt-1 border-t border-slate-800/80">
             <div className="p-3 rounded-lg bg-slate-950/70 border border-slate-800">
-              <span className="font-semibold text-slate-200 block mb-1">Step 1: Open GoDaddy</span>
+              <span className="font-semibold text-slate-200 block mb-1">Step 1: Add to Cloudflare</span>
               <span className="text-slate-400 text-[11px] leading-relaxed">
-                Log into GoDaddy, click <strong>pitx.uk</strong> → <strong>Manage DNS</strong> → <strong>Add New Record</strong>.
+                In the Cloudflare dashboard, click <strong>Add a domain</strong>, enter the domain, choose the <strong>Free</strong> plan. Cloudflare copies your existing records and shows 2 nameservers.
               </span>
             </div>
             <div className="p-3 rounded-lg bg-slate-950/70 border border-slate-800">
-              <span className="font-semibold text-slate-200 block mb-1">Step 2: Copy-Paste Below</span>
+              <span className="font-semibold text-slate-200 block mb-1">Step 2: Switch nameservers at GoDaddy</span>
               <span className="text-slate-400 text-[11px] leading-relaxed">
-                Click the copy buttons below for <strong>Name</strong> and <strong>Value</strong>. GoDaddy uses <code className="text-amber-300">@</code> for root.
+                GoDaddy → domain → <strong>DNS</strong> → <strong>Nameservers</strong> → <strong>Change</strong> → &quot;I&apos;ll use my own&quot; → paste the 2 Cloudflare nameservers → Save.
               </span>
             </div>
             <div className="p-3 rounded-lg bg-slate-950/70 border border-slate-800">
-              <span className="font-semibold text-slate-200 block mb-1">Step 3: Click Verify</span>
+              <span className="font-semibold text-slate-200 block mb-1">Step 3: Enable sending &amp; verify</span>
               <span className="text-slate-400 text-[11px] leading-relaxed">
-                Click <strong>Verify DNS Records</strong> below once saved. Your domain will turn green!
+                Run <code className="text-amber-300">wrangler email sending enable &lt;domain&gt;</code> (creates real SPF/DKIM), then click <strong>Verify DNS Records</strong> here. It checks live DNS.
               </span>
             </div>
           </div>

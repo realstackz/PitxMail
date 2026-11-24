@@ -37,7 +37,7 @@ export default function PlaygroundPage() {
 
     try {
       if (dispatchTarget === "cloudflare") {
-        const res = await fetch("https://pitxmail.pitacsdev.workers.dev/api/v1/emails", {
+        const res = await fetch("/api/v1/edge-send", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",

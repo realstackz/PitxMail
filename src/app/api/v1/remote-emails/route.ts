@@ -7,7 +7,10 @@ export async function GET(req: NextRequest) {
     const cfUrl = `https://pitxmail.pitacsdev.workers.dev/api/v1/emails?limit=${limit}`;
 
     const res = await fetch(cfUrl, {
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${process.env.PITXMAIL_API_KEY || ""}`,
+      },
       cache: "no-store",
     });
 
