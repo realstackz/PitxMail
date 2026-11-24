@@ -12,14 +12,15 @@ async function doh(name: string, type: string): Promise<string[]> {
   );
   if (!res.ok) return [];
   const json: any = await res.json();
-  return (json.Answer || []).map((a: any) => String(a.data).replace(/^"|"$/g, "").replace(/"\s*"/g, ""));
+  return (json.Answer || []).map((a: any) =>
+    String(a.data)
+      .replace(/^"|"$/g, "")
+      .replace(/"\s*"/g, "")
+  );
 }
 
-// Real DNS verification. Cloudflare Email Sending requires the domain's DNS to be
-// hosted on Cloudflare; once it is, `wrangler email sending enable <domain>` creates
-// the real SPF/DKIM records, which this check then confirms.
 export async function POST(
-  req: NextRequest,
+  _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
@@ -31,28 +32,53 @@ export async function POST(
     }
     const domain = rows[0].domain;
 
-    const [ns, txt, dmarc] = await Promise.all([
+    const [ns, txt, dkim, dmarc, mx] = await Promise.all([
       doh(domain, "NS"),
       doh(domain, "TXT"),
+      doh(`cf2024-1._domainkey.${domain}`, "TXT"),
       doh(`_dmarc.${domain}`, "TXT"),
+      doh(domain, "MX"),
     ]);
 
-    const nsOnCloudflare: Check = ns.some((n) => n.toLowerCase().includes(".ns.cloudflare.com")) ? "pass" : "fail";
+    const nsOnCloudflare: Check = ns.some((n) => n.toLowerCase().includes(".ns.cloudflare.com"))
+      ? "pass"
+      : "fail";
     const spfRecords = txt.filter((t) => t.toLowerCase().startsWith("v=spf1"));
-    const spf: Check = spfRecords.length === 1 ? "pass" : "fail";
+    const spf: Check =
+      spfRecords.length === 1 && spfRecords[0].includes("_spf.mx.cloudflare.net") ? "pass" : "fail";
+    const dkimRecords = dkim.filter((t) => t.toLowerCase().includes("v=dkim1"));
+    const dkimCheck: Check = dkimRecords.length >= 1 ? "pass" : "fail";
     const dmarcRecords = dmarc.filter((t) => t.toLowerCase().startsWith("v=dmarc1"));
     const dmarcCheck: Check = dmarcRecords.length === 1 ? "pass" : "fail";
+    const mxCheck: Check = mx.some((m) => m.toLowerCase().includes(".mx.cloudflare.net"))
+      ? "pass"
+      : "fail";
 
     const issues: string[] = [];
     if (nsOnCloudflare === "fail")
-      issues.push(`Nameservers are not on Cloudflare (found: ${ns.join(", ") || "none"}). Add ${domain} to Cloudflare and switch nameservers.`);
-    if (spfRecords.length === 0) issues.push("No SPF record found.");
-    if (spfRecords.length > 1) issues.push(`Multiple SPF records found (${spfRecords.length}); only one is allowed.`);
+      issues.push(
+        `Nameservers are not on Cloudflare (found: ${ns.join(", ") || "none"}).`
+      );
+    if (spf === "fail")
+      issues.push(
+        `Missing Cloudflare SPF record ("v=spf1 include:_spf.mx.cloudflare.net ~all"). Click "Add records and enable" in Cloudflare Email Service.`
+      );
+    if (dkimCheck === "fail")
+      issues.push(
+        `Missing Cloudflare DKIM record at cf2024-1._domainkey.${domain}. Click "Add records and enable" in Cloudflare Email Service.`
+      );
     if (dmarcRecords.length === 0) issues.push("No DMARC record found.");
-    if (dmarcRecords.length > 1) issues.push(`Multiple DMARC records found (${dmarcRecords.length}); only one is allowed.`);
+    if (dmarcRecords.length > 1)
+      issues.push(`Multiple DMARC records found (${dmarcRecords.length}); only one is allowed.`);
+    if (mxCheck === "fail")
+      issues.push("Missing Cloudflare MX records (route1/route2/route3.mx.cloudflare.net).");
 
-    // Ready to send only when DNS is on Cloudflare (that's what Cloudflare Email Sending requires)
-    const verified = nsOnCloudflare === "pass" && spf === "pass" && dmarcCheck === "pass";
+    const verified =
+      nsOnCloudflare === "pass" &&
+      spf === "pass" &&
+      dkimCheck === "pass" &&
+      dmarcCheck === "pass" &&
+      mxCheck === "pass";
     const status = verified ? "verified" : "pending";
     const toStatus = (c: Check) => (c === "pass" ? "verified" : "failed");
 
@@ -61,10 +87,9 @@ export async function POST(
       .set({
         verificationStatus: status,
         spfStatus: toStatus(spf),
+        dkimStatus: toStatus(dkimCheck),
         dmarcStatus: toStatus(dmarcCheck),
-        // DKIM/MX are provisioned by Cloudflare Email Sending once the zone is on Cloudflare
-        dkimStatus: nsOnCloudflare === "pass" ? "verified" : "pending",
-        mxStatus: nsOnCloudflare === "pass" ? "verified" : "pending",
+        mxStatus: toStatus(mxCheck),
       })
       .where(eq(domains.id, id));
 
@@ -72,8 +97,14 @@ export async function POST(
       success: verified,
       domain,
       status,
-      checks: { nameserversOnCloudflare: nsOnCloudflare, spf, dmarc: dmarcCheck },
-      found: { nameservers: ns, spf: spfRecords, dmarc: dmarcRecords },
+      checks: {
+        nameserversOnCloudflare: nsOnCloudflare,
+        spf,
+        dkim: dkimCheck,
+        dmarc: dmarcCheck,
+        mx: mxCheck,
+      },
+      found: { nameservers: ns, spf: spfRecords, dkim: dkimRecords, dmarc: dmarcRecords, mx },
       issues,
     });
   } catch (err: any) {
