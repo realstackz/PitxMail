@@ -4,29 +4,18 @@
   "main": "worker/index.ts",
   "compatibility_date": "2026-01-01",
   "compatibility_flags": ["nodejs_compat"],
-  "routes": [
-    {
-      "pattern": "pitx.uk/*",
-      "zone_name": "pitx.uk",
-      "custom_domain": true
-    },
-    {
-      "pattern": "mail.pitx.uk/*",
-      "zone_name": "pitx.uk",
-      "custom_domain": true
-    }
-  ],
+  "account_id": "9589ea8db135f9eed1a628bebc3c5e71",
+  "workers_dev": true,
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "pitxmail-db",
-      "database_id": "YOUR_D1_DATABASE_ID"
+      "database_id": "4cb028e8-5fa2-4cdf-ab60-4509b71d93fa"
     }
   ],
   "send_email": [
     {
-      "name": "EMAIL",
-      "allowed_sender_addresses": ["*@pitx.uk", "*@pitacs.com"]
+      "name": "EMAIL"
     }
   ],
   "observability": {

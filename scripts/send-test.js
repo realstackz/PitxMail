@@ -1,8 +1,8 @@
 async function sendTest() {
   const payload = {
-    from: "Pitxmail <noreply@pitacs.com>",
+    from: "Pitxmail <noreply@pitx.uk>",
     to: "standoh@pitacs.com",
-    subject: "Welcome to Pitxmail — Cloudflare Email Infrastructure Active",
+    subject: "pitx.uk DNS Verified — Email Infrastructure Ready",
     html: `
       <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 580px; margin: 0 auto; padding: 32px 24px; background: #0f172a; color: #f8fafc; border-radius: 12px; border: 1px solid #1e293b;">
         <div style="display: flex; align-items: center; margin-bottom: 24px;">

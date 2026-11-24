@@ -40,7 +40,7 @@ export class Pitxmail {
       throw new Error("Pitxmail apiKey is required");
     }
     this.apiKey = options.apiKey;
-    this.baseUrl = (options.baseUrl || "http://localhost:3000").replace(/\/$/, "");
+    this.baseUrl = (options.baseUrl || process.env.NEXT_PUBLIC_PITXMAIL_URL || "https://pitxmail.pitacsdev.workers.dev").replace(/\/$/, "");
   }
 
   get emails() {

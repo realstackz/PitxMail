@@ -94,10 +94,13 @@ export default function DashboardLayout({
           <div className="p-3 rounded-lg bg-slate-800/50 border border-slate-700/40 text-xs space-y-1.5">
             <div className="flex items-center space-x-2 text-slate-300 font-medium">
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Cloudflare Native</span>
+              <span>Cloudflare Live Edge</span>
             </div>
+            <p className="text-[10px] font-mono text-emerald-400 truncate">
+              pitxmail.pitacsdev.workers.dev
+            </p>
             <p className="text-[11px] text-slate-400 leading-relaxed">
-              Powered by Cloudflare Workers & D1. Zero external delivery subscription required.
+              Connected directly to Cloudflare D1 & Worker runtime.
             </p>
           </div>
         </div>
