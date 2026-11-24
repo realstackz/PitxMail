@@ -12,6 +12,7 @@ import {
   Terminal,
   ShieldCheck,
   ChevronRight,
+  Activity,
 } from "lucide-react";
 
 export default function DashboardLayout({
@@ -25,6 +26,7 @@ export default function DashboardLayout({
     { label: "Overview", href: "/", icon: BarChart3 },
     { label: "Emails", href: "/emails", icon: Mail },
     { label: "Playground", href: "/playground", icon: Send },
+    { label: "API Usage", href: "/usage", icon: Activity },
     { label: "Domains", href: "/domains", icon: Globe },
     { label: "API Keys", href: "/api-keys", icon: Key },
     { label: "Docs & SDK", href: "/docs", icon: BookOpen },

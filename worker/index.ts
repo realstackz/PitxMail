@@ -87,6 +87,81 @@ export default {
       );
     }
 
+    // OpenAPI 3.0 Spec (public for AI agents and integrations)
+    if (url.pathname === "/api/v1/openapi.json" || url.pathname === "/openapi.json") {
+      return new Response(
+        JSON.stringify({
+          openapi: "3.0.0",
+          info: {
+            title: "Pitxmail API",
+            version: "1.0.0",
+            description: "Cloudflare-native transactional email service for Pitacs projects and autonomous AI agents.",
+          },
+          servers: [{ url: "https://mail.pitx.uk/api/v1", description: "Primary Edge Endpoint" }],
+          paths: {
+            "/emails": {
+              post: {
+                summary: "Dispatch a transactional email",
+                operationId: "sendEmail",
+                requestBody: {
+                  required: true,
+                  content: {
+                    "application/json": {
+                      schema: {
+                        type: "object",
+                        required: ["from", "to", "subject"],
+                        properties: {
+                          from: { type: "string", example: "Pitacs Orders <orders@pitx.uk>" },
+                          to: { type: "array", items: { type: "string" }, example: ["customer@example.com"] },
+                          subject: { type: "string", example: "Order Confirmation" },
+                          html: { type: "string", example: "<h1>Order Confirmed</h1>" },
+                          text: { type: "string", example: "Order Confirmed" },
+                        },
+                      },
+                    },
+                  },
+                },
+                responses: {
+                  "200": { description: "Email successfully delivered via Cloudflare" },
+                  "422": { description: "Delivery failed or domain unverified" },
+                },
+              },
+              get: {
+                summary: "List recent messages",
+                operationId: "listEmails",
+                parameters: [{ name: "limit", in: "query", schema: { type: "integer", default: 50 } }],
+                responses: { "200": { description: "List of messages" } },
+              },
+            },
+            "/emails/{id}": {
+              get: {
+                summary: "Get message details and delivery attempt log",
+                operationId: "getEmail",
+                parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+                responses: { "200": { description: "Message details" } },
+              },
+            },
+            "/emails/{id}/retry": {
+              post: {
+                summary: "Retry sending a failed message",
+                operationId: "retryEmail",
+                parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+                responses: { "200": { description: "Retry attempt recorded" } },
+              },
+            },
+            "/stats": {
+              get: {
+                summary: "Get delivery statistics and 24h volume",
+                operationId: "getStats",
+                responses: { "200": { description: "Stats summary" } },
+              },
+            },
+          },
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     // Every /api/v1/* route requires a valid API key or dashboard context
     let auth: { organisationId: string; projectId: string } | null = null;
     if (url.pathname.startsWith("/api/v1/")) {
