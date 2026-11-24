@@ -28,6 +28,7 @@ export default function PlaygroundPage() {
 
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState<any>(null);
+  const [dispatchTarget, setDispatchTarget] = useState<"cloudflare" | "local">("cloudflare");
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -35,28 +36,43 @@ export default function PlaygroundPage() {
     setResult(null);
 
     try {
-      // First get or use default key
-      const keysRes = await fetch("/api/v1/api-keys");
-      const keysJson = await keysRes.json();
-      const defaultKey = "pm_live_default_pitacs_key_2026";
+      if (dispatchTarget === "cloudflare") {
+        const res = await fetch("https://pitxmail.pitacsdev.workers.dev/api/v1/emails", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            from,
+            to,
+            subject,
+            html,
+            text: "Testing dispatch via Cloudflare live worker edge.",
+            tags: { environment: "cloudflare_live", source: "playground" },
+          }),
+        });
+        const data = await res.json();
+        setResult({ ok: res.ok, status: res.status, target: "Cloudflare Edge", data });
+      } else {
+        const defaultKey = "pm_live_default_pitacs_key_2026";
+        const res = await fetch("/api/v1/emails", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${defaultKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            from,
+            to,
+            subject,
+            html,
+            tags: { environment: "playground", source: "dashboard" },
+          }),
+        });
 
-      const res = await fetch("/api/v1/emails", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${defaultKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          from,
-          to,
-          subject,
-          html,
-          tags: { environment: "playground", source: "dashboard" },
-        }),
-      });
-
-      const data = await res.json();
-      setResult({ ok: res.ok, status: res.status, data });
+        const data = await res.json();
+        setResult({ ok: res.ok, status: res.status, target: "Local Engine", data });
+      }
     } catch (err: any) {
       setResult({ ok: false, error: err.message });
     } finally {
@@ -133,6 +149,40 @@ export default function PlaygroundPage() {
           onSubmit={handleSend}
           className="p-6 rounded-xl bg-slate-900/60 border border-slate-800 space-y-4"
         >
+          {/* Target Toggle */}
+          <div>
+            <label className="block text-xs font-medium text-slate-400 mb-1.5">Dispatch Route</label>
+            <div className="grid grid-cols-2 gap-2 p-1 bg-slate-950 border border-slate-800 rounded-lg text-xs">
+              <button
+                type="button"
+                onClick={() => setDispatchTarget("cloudflare")}
+                className={`py-1.5 px-3 rounded-md font-medium transition flex items-center justify-center space-x-1.5 ${
+                  dispatchTarget === "cloudflare"
+                    ? "bg-blue-600 text-white shadow-sm"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                <span>Cloudflare Live Edge</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setDispatchTarget("local")}
+                className={`py-1.5 px-3 rounded-md font-medium transition flex items-center justify-center space-x-1.5 ${
+                  dispatchTarget === "local"
+                    ? "bg-blue-600 text-white shadow-sm"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                <span>Local Sandbox Engine</span>
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-500 mt-1">
+              {dispatchTarget === "cloudflare"
+                ? "Rerouting to https://pitxmail.pitacsdev.workers.dev (persisted in Cloudflare D1)"
+                : "Testing with local SQLite engine and dashboard preview"}
+            </p>
+          </div>
+
           <div>
             <label className="block text-xs font-medium text-slate-400 mb-1">From</label>
             <input
