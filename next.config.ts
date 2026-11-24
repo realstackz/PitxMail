@@ -2,11 +2,10 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
-  // Server action & api limits
-  experimental: {
-    serverActions: {
-      bodySizeLimit: "4mb",
-    },
+  output: "export",
+  trailingSlash: true,
+  images: {
+    unoptimized: true,
   },
 };
 
