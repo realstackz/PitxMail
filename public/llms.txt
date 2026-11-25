@@ -1,112 +1,241 @@
 # Pitxmail Developer & AI Agent Guide
-> Unified, high-reliability transactional email API for Pitacs projects and autonomous agents.
+> Unified, high-reliability transactional email API for Pitacs applications and autonomous AI agents.
+> Powered by Cloudflare Workers, Cloudflare D1, Cloudflare Email Sending, and automatic Resend hybrid failover.
 
 ## Quick Facts
 - Service: Pitxmail Cloudflare-Native Email Service
-- Base URL: https://mail.pitx.uk/api/v1
-- Fallback URL: https://pitxmail.pitacsdev.workers.dev/api/v1
+- Production Base URL: https://mail.pitx.uk/api/v1
+- Fallback Worker URL: https://pitxmail.pitacsdev.workers.dev/api/v1
 - Web Dashboard: https://mail.pitx.uk
-- Authentication: Bearer Token (Authorization: Bearer <PITXMAIL_API_KEY>)
-- Generate API Keys: https://mail.pitx.uk/api-keys (requires admin login)
-- Allowed Senders: Any address ending with @pitx.uk (e.g. orders@pitx.uk, alerts@pitx.uk, noreply@pitx.uk)
+- Authentication: Bearer Token (`Authorization: Bearer <PITXMAIL_API_KEY>`)
+- API Key Format: `pm_live_...` or `pm_test_...`
+- Key Generation: https://mail.pitx.uk/api-keys (requires admin login)
+- Allowed Sender Domains: `@pitx.uk` and `@pitacs.pitx.uk` (e.g. `orders@pitx.uk`, `noreply@pitacs.pitx.uk`, `alerts@pitx.uk`)
+- Target Response Latency: < 300ms on Cloudflare Edge
+
+---
+
+## Hybrid Resend & Cloudflare Failover Architecture
+Pitxmail combines Resend's high inbox placement with Cloudflare's unlimited edge scale:
+1. **Primary Route (Resend)**: Outbound emails route through Resend up to your configured daily quota (e.g. 90-100 emails/day).
+2. **Automatic Edge Failover (Cloudflare)**: When the daily Resend limit is reached, or if Resend returns HTTP 429 / 5xx, Pitxmail automatically trips a circuit breaker and delivers the email through Cloudflare Email Sending.
+3. **Zero Configuration Needed**: Upstream callers never need to manage failover or retries—Pitxmail handles routing, logging, and delivery status invisibly.
+4. **Audit Trail**: Every hop is logged in Cloudflare D1 with timestamps, provider name (`resend` vs `cloudflare`), attempt number, and error reasons.
+
+---
 
 ## Core API Endpoints
 
 ### 1. Send Email
-- Method: POST /api/v1/emails
+- Method: `POST /api/v1/emails`
 - Headers:
-  - Authorization: Bearer <API_KEY>
-  - Content-Type: application/json
+  - `Authorization: Bearer <PITXMAIL_API_KEY>`
+  - `Content-Type: application/json`
+  - `Idempotency-Key: <unique-uuid>` (Optional: prevents duplicate sends)
 - Request Body Schema:
+  ```json
   {
-    "from": "Pitacs Orders <orders@pitx.uk>", // Required: String with @pitx.uk domain
-    "to": ["customer@example.com"],             // Required: String or Array of Strings
-    "subject": "Order Confirmation",           // Required: String
-    "html": "<h1>Order Confirmed</h1>",        // Optional: HTML string
-    "text": "Order Confirmed"                  // Optional: Plain text string
+    "from": "Pitacs Orders <orders@pitx.uk>",
+    "to": ["customer@example.com"],
+    "cc": ["manager@pitacs.com"],
+    "bcc": ["archive@pitacs.com"],
+    "replyTo": "support@pitacs.com",
+    "subject": "Order Confirmation #4829",
+    "html": "<h1>Order Confirmed</h1><p>Thank you for choosing Pitacs.</p>",
+    "text": "Order Confirmed. Thank you for choosing Pitacs.",
+    "tags": { "environment": "production", "source": "hub" },
+    "metadata": { "orderId": "4829", "userId": "usr_123" }
   }
-- Response (HTTP 200 OK):
+  ```
+- Response (`HTTP 200 OK`):
+  ```json
   {
     "id": "pm_cf_1795529594819_6ox50x",
     "object": "email",
     "status": "delivered",
-    "provider": "cloudflare",
+    "provider": "resend",
     "error": null,
-    "created_at": "2026-11-24T14:13:14.819Z"
+    "created_at": "2026-11-25T11:20:00.000Z"
   }
-- Error Response (HTTP 400 / 422):
-  {
-    "error": "Error description"
-  }
+  ```
+- Resend Drop-In Compatibility: accepts `reply_to` as an alias for `replyTo`.
 
-### 2. List Emails
-- Method: GET /api/v1/emails?limit=50
-- Headers: Authorization: Bearer <API_KEY>
+### 2. List Emails (with Server-Side Filtering & Search)
+- Method: `GET /api/v1/emails`
+- Query Parameters:
+  - `limit`: Number of records (default: 50, max: 100)
+  - `offset`: Pagination offset (default: 0)
+  - `status`: Filter by `delivered`, `submitted`, `failed`, `bounced`, or `all`
+  - `provider`: Filter by `resend`, `cloudflare`, or `all`
+  - `q`: Search term matching recipient email, subject line, or message ID
+  - `since`: Unix millisecond timestamp (inclusive start)
+  - `until`: Unix millisecond timestamp (inclusive end)
 - Response:
+  ```json
   {
     "data": [
       {
-        "id": "pm_cf_...",
-        "fromAddress": "orders@pitx.uk",
-        "toAddress": "user@example.com",
-        "subject": "Order #4829",
+        "id": "pm_cf_1795604129010_x3lx39",
+        "fromAddress": "noreply@pitacs.pitx.uk",
+        "fromName": "PITACS Hub",
+        "toAddress": "samuel.tandoh@pitacs.com",
+        "subject": "PITACS Hub: Check-in Confirmed",
         "status": "delivered",
-        "createdAt": 1795529594819
+        "provider": "cloudflare",
+        "retryCount": 0,
+        "createdAt": 1795604129010
       }
     ],
-    "count": 1
+    "count": 1,
+    "total": 28,
+    "limit": 50,
+    "offset": 0,
+    "hasMore": false
   }
+  ```
 
-### 3. Get Email Details & Attempts
-- Method: GET /api/v1/emails/:id
-- Headers: Authorization: Bearer <API_KEY>
+### 3. Get Email Details & Attempt History
+- Method: `GET /api/v1/emails/:id`
 - Response:
+  ```json
   {
-    "message": { "id": "...", "htmlBody": "...", "status": "delivered" },
-    "attempts": [ { "attempt_number": 1, "status": "success", "finished_at": 1795529595454 } ]
-  }
-
-### 4. Retry Failed Email
-- Method: POST /api/v1/emails/:id/retry
-- Headers: Authorization: Bearer <API_KEY>
-
-### 5. Check System Health
-- Method: GET /health
-- Public endpoint (no auth required)
-
-## Recommended TypeScript Helper for Agent Integration
-```typescript
-export async function sendEmail({
-  to,
-  subject,
-  html,
-  text,
-  from = "Pitacs Orders <orders@pitx.uk>",
-}: {
-  to: string | string[];
-  subject: string;
-  html: string;
-  text?: string;
-  from?: string;
-}) {
-  const res = await fetch("https://mail.pitx.uk/api/v1/emails", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.PITXMAIL_API_KEY}`,
+    "message": {
+      "id": "pm_cf_1795604129010_x3lx39",
+      "fromAddress": "noreply@pitacs.pitx.uk",
+      "toAddress": "samuel.tandoh@pitacs.com",
+      "subject": "PITACS Hub: Check-in Confirmed",
+      "htmlBody": "<!DOCTYPE html>...",
+      "status": "delivered",
+      "provider": "cloudflare"
     },
-    body: JSON.stringify({
-      from,
-      to: Array.isArray(to) ? to : [to],
-      subject,
-      html,
-      text,
-    }),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || `Dispatch failed: ${res.status}`);
+    "attempts": [
+      {
+        "attemptNumber": 1,
+        "provider": "resend",
+        "status": "failed",
+        "errorMessage": "Daily quota exceeded",
+        "startedAt": 1795604128500,
+        "finishedAt": 1795604128900
+      },
+      {
+        "attemptNumber": 2,
+        "provider": "cloudflare",
+        "status": "delivered",
+        "startedAt": 1795604128950,
+        "finishedAt": 1795604129010
+      }
+    ]
   }
-  return res.json();
-}
+  ```
+
+### 4. 1-Click Retry Failed Email
+- Method: `POST /api/v1/emails/:id/retry`
+- Immediately triggers a new dispatch attempt for failed or bounced messages.
+
+### 5. Download Raw RFC-822 EML Message
+- Method: `GET /api/v1/emails/:id/eml`
+- Returns: `message/rfc822` MIME formatted stream for viewing in Outlook, Apple Mail, or Thunderbird.
+
+### 6. Deliverability Stats & Quota Telemetry
+- Method: `GET /api/v1/stats`
+- Returns:
+  ```json
+  {
+    "total": 28,
+    "delivered": 15,
+    "failed": 10,
+    "deliveryRate": "53.6%",
+    "volume24h": 28,
+    "resendConfigured": true,
+    "resendToday": 14,
+    "resendDailyLimit": 90,
+    "resendMonth": 142,
+    "resendMonthlyLimit": 2850,
+    "resendPausedUntil": null,
+    "providerBreakdown": { "resend": 14, "cloudflare": 14 },
+    "series": [
+      { "date": 1795478400000, "total": 16, "resend": 0, "cloudflare": 6, "failed": 10 },
+      { "date": 1795564800000, "total": 12, "resend": 0, "cloudflare": 12, "failed": 0 }
+    ]
+  }
+  ```
+
+### 7. Suppressions Management
+- `GET /api/v1/suppressions`: List blocked/bounced recipient addresses.
+- `POST /api/v1/suppressions`: Add suppression `{ "email": "bad@example.com", "reason": "bounce" }`.
+- `DELETE /api/v1/suppressions/:id`: Remove suppression.
+
+### 8. Webhook Ingestion with Svix Signature Verification
+- Method: `POST /api/webhooks/resend`
+- Headers:
+  - `svix-id`: Message ID
+  - `svix-timestamp`: Unix timestamp
+  - `svix-signature`: HMAC-SHA256 signature
+- Pitxmail verifies incoming signatures using `RESEND_WEBHOOK_SECRET` before registering delivery or bounce status.
+
+### 9. Public Health Check
+- Method: `GET /health` (No authentication required)
+- Returns: `{ "status": "ok", "service": "pitxmail-cloudflare-worker" }`
+
+---
+
+## TypeScript SDK / Drop-In Replacement for Resend
+
+```typescript
+import { Pitxmail, Resend } from "pitxmail";
+
+// Option 1: Standard Pitxmail Client
+const pitxmail = new Pitxmail({ apiKey: process.env.PITXMAIL_API_KEY! });
+
+const { data, error } = await pitxmail.emails.send({
+  from: "PITACS Hub <noreply@pitacs.pitx.uk>",
+  to: ["user@pitacs.com"],
+  subject: "Check-in Confirmed",
+  html: "<p>Your shift has started.</p>",
+});
+
+// Option 2: 100% Drop-In Replacement for existing Resend code
+const resend = new Resend(process.env.PITXMAIL_API_KEY!);
+const result = await resend.emails.send({
+  from: "Pitacs Orders <orders@pitx.uk>",
+  to: "customer@example.com",
+  subject: "Order Dispatched",
+  html: "<strong>Shipped!</strong>",
+});
 ```
+
+---
+
+## Python Helper for Fast Integration
+
+```python
+import os
+import requests
+
+def send_email(to: str | list[str], subject: str, html: str, from_addr: str = "Pitacs Orders <orders@pitx.uk>"):
+    api_key = os.getenv("PITXMAIL_API_KEY")
+    url = os.getenv("PITXMAIL_URL", "https://mail.pitx.uk/api/v1/emails")
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "from": from_addr,
+        "to": [to] if isinstance(to, str) else to,
+        "subject": subject,
+        "html": html,
+    }
+
+    res = requests.post(url, json=payload, headers=headers, timeout=10)
+    res.raise_for_status()
+    return res.json()
+```
+
+---
+
+## Migration Guide for Existing Services
+To migrate any service from Resend to Pitxmail:
+1. Set `PITXMAIL_API_KEY` (generate one at https://mail.pitx.uk/api-keys).
+2. Replace base endpoint `https://api.resend.com` with `https://mail.pitx.uk/api/v1`.
+3. Keep email payloads unchanged (`from`, `to`, `subject`, `html`, `reply_to` are 100% compatible).

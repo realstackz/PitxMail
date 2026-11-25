@@ -15,11 +15,15 @@ import {
   Cpu,
   FileCode,
   Send,
+  RefreshCw,
+  Search,
+  Download,
+  AlertTriangle,
 } from "lucide-react";
 
 export default function DocsPage() {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
-  const [selectedLang, setSelectedLang] = useState<"ts" | "py" | "curl" | "go">("ts");
+  const [selectedLang, setSelectedLang] = useState<"ts" | "resend" | "py" | "curl" | "go">("ts");
 
   const copyToClipboard = (key: string, text: string) => {
     navigator.clipboard.writeText(text);
@@ -27,12 +31,16 @@ export default function DocsPage() {
     setTimeout(() => setCopiedKey(null), 2000);
   };
 
-  const agentPrompt = `You have access to the Pitxmail internal email infrastructure service for sending transactional emails.
+  const agentPrompt = `You have access to the Pitxmail high-reliability transactional email service for Pitacs applications.
 Base URL: https://mail.pitx.uk/api/v1
 Live API Key: pm_live_YOUR_API_KEY
-Verified Sender Domain: @pitx.uk (e.g., orders@pitx.uk, alerts@pitx.uk, noreply@pitx.uk)
+Allowed Sender Domains: @pitx.uk (e.g., orders@pitx.uk) and @pitacs.pitx.uk (e.g., noreply@pitacs.pitx.uk)
 
-To send an email from your code:
+Features & Architecture:
+- Hybrid Routing: Automatically routes the first ~95 emails/day via Resend for high inbox placement, then auto-fails over to Cloudflare Email Sending if daily limits or errors occur.
+- Resend Drop-In Replacement: Compatible with existing Resend client calls.
+
+1. Send Email:
 POST https://mail.pitx.uk/api/v1/emails
 Headers:
   Authorization: Bearer pm_live_YOUR_API_KEY
@@ -40,60 +48,82 @@ Headers:
 Body:
 {
   "from": "Pitacs Orders <orders@pitx.uk>",
-  "to": ["recipient@example.com"],
-  "subject": "Order Confirmation",
-  "html": "<h1>Your Order is Confirmed</h1>",
-  "text": "Your Order is Confirmed"
+  "to": ["customer@example.com"],
+  "subject": "Order Confirmation #4829",
+  "html": "<h1>Order Confirmed</h1><p>Thank you for choosing Pitacs.</p>",
+  "text": "Order Confirmed. Thank you for choosing Pitacs.",
+  "replyTo": "support@pitacs.com"
 }
 
-Response (HTTP 200):
-{
-  "id": "pm_cf_...",
-  "status": "delivered",
-  "provider": "cloudflare"
+2. Search & List Emails:
+GET https://mail.pitx.uk/api/v1/emails?q=customer@example.com&status=delivered&limit=25
+Headers:
+  Authorization: Bearer pm_live_YOUR_API_KEY
+
+3. Inspect Details & Delivery Attempts:
+GET https://mail.pitx.uk/api/v1/emails/:id
+Headers:
+  Authorization: Bearer pm_live_YOUR_API_KEY
+
+4. 1-Click Retry Failed Email:
+POST https://mail.pitx.uk/api/v1/emails/:id/retry
+Headers:
+  Authorization: Bearer pm_live_YOUR_API_KEY
+
+5. Download Raw RFC-822 EML:
+GET https://mail.pitx.uk/api/v1/emails/:id/eml
+Headers:
+  Authorization: Bearer pm_live_YOUR_API_KEY`;
+
+  const tsCode = `// 1. Using Official Pitxmail SDK
+import { Pitxmail } from "pitxmail";
+
+const pitxmail = new Pitxmail({ apiKey: process.env.PITXMAIL_API_KEY! });
+
+// Dispatch an email
+const { data, error } = await pitxmail.emails.send({
+  from: "PITACS Hub <noreply@pitacs.pitx.uk>",
+  to: ["user@pitacs.com"],
+  cc: ["supervisor@pitacs.com"],
+  replyTo: "support@pitacs.com",
+  subject: "Check-in Confirmed",
+  html: "<h1>Shift Started</h1><p>Clocked in at 08:30 AM.</p>",
+  text: "Shift Started. Clocked in at 08:30 AM.",
+  tags: { source: "hub", module: "attendance" },
+});
+
+// Search & list emails
+const list = await pitxmail.emails.list({
+  q: "user@pitacs.com",
+  status: "delivered",
+  limit: 25,
+});
+
+// Inspect attempt history (shows Resend -> Cloudflare failover hops)
+const detail = await pitxmail.emails.get(data.id);
+console.log("Hops taken:", detail.attempts);
+
+// 1-Click Retry if failed
+if (detail.message.status === "failed") {
+  await pitxmail.emails.retry(data.id);
 }`;
 
-  const tsCode = `// lib/pitxmail.ts
-export interface SendEmailPayload {
-  to: string | string[];
-  subject: string;
-  html: string;
-  text?: string;
-  from?: string; // e.g. "Pitacs Orders <orders@pitx.uk>"
-}
+  const resendDropInCode = `// Drop-in replacement for existing Resend code
+// Simply change your import:
+import { Resend } from "pitxmail"; // Or import { Resend } from "@/lib/pitxmail"
 
-export async function sendEmail({
-  to,
-  subject,
-  html,
-  text,
-  from = "Pitacs Orders <orders@pitx.uk>",
-}: SendEmailPayload) {
-  const apiKey = process.env.PITXMAIL_API_KEY || "pm_live_YOUR_API_KEY";
-  const endpoint = process.env.PITXMAIL_URL || "https://mail.pitx.uk/api/v1/emails";
+// Use exactly as you normally would:
+const resend = new Resend(process.env.PITXMAIL_API_KEY);
 
-  const res = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: \`Bearer \${apiKey}\`,
-    },
-    body: JSON.stringify({
-      from,
-      to: Array.isArray(to) ? to : [to],
-      subject,
-      html,
-      text,
-    }),
-  });
+const result = await resend.emails.send({
+  from: "Pitacs Orders <orders@pitx.uk>",
+  to: "customer@example.com",
+  subject: "Order Dispatched",
+  html: "<strong>Your order has shipped!</strong>",
+  reply_to: "orders@pitx.uk", // Resend snake_case fully supported
+});
 
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error?.message || data.error || \`Dispatch failed: \${res.status}\`);
-  }
-
-  return data; // { id: "pm_cf_...", status: "delivered", provider: "cloudflare" }
-}`;
+console.log("Email ID:", result.data?.id);`;
 
   const pyCode = `import os
 import requests
@@ -103,7 +133,8 @@ def send_pitxmail(
     subject: str,
     html: str,
     text: str = "",
-    from_addr: str = "Pitacs Orders <orders@pitx.uk>"
+    from_addr: str = "Pitacs Orders <orders@pitx.uk>",
+    reply_to: str = None
 ) -> dict:
     api_key = os.getenv("PITXMAIL_API_KEY", "pm_live_YOUR_API_KEY")
     url = os.getenv("PITXMAIL_URL", "https://mail.pitx.uk/api/v1/emails")
@@ -119,21 +150,39 @@ def send_pitxmail(
         "html": html,
         "text": text or html
     }
+    if reply_to:
+        payload["replyTo"] = reply_to
 
     response = requests.post(url, json=payload, headers=headers, timeout=10)
     response.raise_for_status()
-    return response.json()`;
+    return response.json()
 
-  const curlCode = `curl -X POST https://mail.pitx.uk/api/v1/emails \\
+# Example dispatch:
+# send_pitxmail("customer@example.com", "Order Update", "<p>Shipped!</p>")`;
+
+  const curlCode = `# 1. Send Email (Auto-routes Resend -> Cloudflare)
+curl -X POST https://mail.pitx.uk/api/v1/emails \\
   -H "Authorization: Bearer pm_live_YOUR_API_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{
     "from": "Pitacs Orders <orders@pitx.uk>",
     "to": ["customer@example.com"],
-    "subject": "Order #4829 Processed",
-    "html": "<h1>Your Pitacs Order is on its way!</h1><p>Items have been packaged.</p>",
+    "subject": "Order #4829 Dispatched",
+    "html": "<h1>Your Pitacs Order is on its way!</h1>",
     "text": "Your Pitacs Order is on its way!"
-  }'`;
+  }'
+
+# 2. Server-side Search & Status Filter
+curl -G https://mail.pitx.uk/api/v1/emails \\
+  -H "Authorization: Bearer pm_live_YOUR_API_KEY" \\
+  --data-urlencode "q=customer@example.com" \\
+  --data-urlencode "status=delivered" \\
+  --data-urlencode "limit=10"
+
+# 3. Download Raw RFC-822 EML File
+curl https://mail.pitx.uk/api/v1/emails/pm_cf_1795604129010_x3lx39/eml \\
+  -H "Authorization: Bearer pm_live_YOUR_API_KEY" \\
+  -o message.eml`;
 
   const goCode = `package main
 
@@ -188,7 +237,7 @@ func SendEmail(to string, subject string, html string) error {
         </div>
         <h1 className="text-2xl font-bold tracking-tight text-white mt-1">Documentation & AI Agent Instructions</h1>
         <p className="text-sm text-slate-400 mt-1">
-          Everything your developers and autonomous AI agents need to integrate Pitxmail transactional email into your apps.
+          Everything developers and autonomous AI agents need to integrate Pitxmail hybrid transactional email into your applications.
         </p>
       </div>
 
@@ -229,32 +278,32 @@ func SendEmail(to string, subject string, html string) error {
       {/* Key Architectural Facts */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2">
-          <div className="flex items-center space-x-2 text-emerald-400 text-xs font-semibold">
-            <ShieldCheck className="w-4 h-4" />
-            <span>Authenticated Sender</span>
+          <div className="flex items-center space-x-2 text-purple-400 text-xs font-semibold">
+            <Layers className="w-4 h-4" />
+            <span>Hybrid Auto-Failover</span>
           </div>
           <p className="text-xs text-slate-300 leading-relaxed">
-            All outbound mail sends from <code className="text-blue-300">@pitx.uk</code> authenticated by Cloudflare SPF, DKIM (<code className="text-slate-400">cf2024-1</code>), and DMARC.
+            Routes up to <strong>90-100 emails/day</strong> via <strong>Resend</strong> for high inbox reputation, then seamlessly overflows to <strong>Cloudflare Email Sending</strong> when daily limits are reached.
+          </p>
+        </div>
+
+        <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2">
+          <div className="flex items-center space-x-2 text-emerald-400 text-xs font-semibold">
+            <ShieldCheck className="w-4 h-4" />
+            <span>Authenticated Senders</span>
+          </div>
+          <p className="text-xs text-slate-300 leading-relaxed">
+            Outbound mail sends from <code className="text-blue-300">@pitx.uk</code> and <code className="text-blue-300">@pitacs.pitx.uk</code> authenticated by Cloudflare SPF, DKIM, and strict DMARC alignment.
           </p>
         </div>
 
         <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2">
           <div className="flex items-center space-x-2 text-blue-400 text-xs font-semibold">
-            <Zap className="w-4 h-4" />
-            <span>Cloudflare Edge Native</span>
-          </div>
-          <p className="text-xs text-slate-300 leading-relaxed">
-            Dispatches execute in <strong>&lt; 500ms</strong> directly inside Cloudflare Workers without external SMTP relays or third-party email providers.
-          </p>
-        </div>
-
-        <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2">
-          <div className="flex items-center space-x-2 text-purple-400 text-xs font-semibold">
             <Cpu className="w-4 h-4" />
-            <span>Audit Logging in D1</span>
+            <span>Audit Trail & 1-Click Retry</span>
           </div>
           <p className="text-xs text-slate-300 leading-relaxed">
-            Every dispatch, raw HTML payload, recipient, and retry attempt is permanently logged into Cloudflare D1 for debugging and audit compliance.
+            Every dispatch attempt, error response, and HTML payload is persisted in Cloudflare D1 with instant 1-click retries and raw RFC-822 EML exports.
           </p>
         </div>
       </div>
@@ -265,9 +314,10 @@ func SendEmail(to string, subject string, html string) error {
         <div className="flex items-center justify-between px-6 py-3 border-b border-slate-800 bg-slate-950/40">
           <div className="flex items-center space-x-1">
             {[
-              { id: "ts", label: "TypeScript / Next.js" },
-              { id: "py", label: "Python / FastAPI" },
-              { id: "curl", label: "cURL / Bash" },
+              { id: "ts", label: "TypeScript SDK" },
+              { id: "resend", label: "Resend Drop-In" },
+              { id: "py", label: "Python" },
+              { id: "curl", label: "cURL / CLI" },
               { id: "go", label: "Go" },
             ].map((tab) => (
               <button
@@ -289,6 +339,8 @@ func SendEmail(to string, subject string, html string) error {
               const code =
                 selectedLang === "ts"
                   ? tsCode
+                  : selectedLang === "resend"
+                  ? resendDropInCode
                   : selectedLang === "py"
                   ? pyCode
                   : selectedLang === "curl"
@@ -307,6 +359,7 @@ func SendEmail(to string, subject string, html string) error {
         <div className="p-6 font-mono text-xs text-slate-200 overflow-x-auto bg-slate-950/70 leading-relaxed">
           <pre>
             {selectedLang === "ts" && tsCode}
+            {selectedLang === "resend" && resendDropInCode}
             {selectedLang === "py" && pyCode}
             {selectedLang === "curl" && curlCode}
             {selectedLang === "go" && goCode}
@@ -339,11 +392,11 @@ func SendEmail(to string, subject string, html string) error {
               <span className="text-xs text-slate-400">Dispatch an email</span>
             </div>
             <p className="text-xs text-slate-300 leading-relaxed">
-              Sends an email immediately using Cloudflare native email routing. Accepts <code className="text-blue-300">to</code> (string or array), <code className="text-blue-300">from</code>, <code className="text-blue-300">subject</code>, and optional <code className="text-blue-300">html</code> and <code className="text-blue-300">text</code>.
+              Dispatches an email through Resend (primary) or Cloudflare (failover). Accepts <code className="text-blue-300">to</code>, <code className="text-blue-300">from</code>, <code className="text-blue-300">subject</code>, <code className="text-blue-300">html</code>, <code className="text-blue-300">text</code>, <code className="text-blue-300">cc</code>, <code className="text-blue-300">bcc</code>, and <code className="text-blue-300">replyTo</code>.
             </p>
             <div className="p-3 rounded-lg bg-slate-900/80 text-[11px] font-mono text-slate-300">
               <div className="text-slate-500">// Example Response (200 OK)</div>
-              {`{ "id": "pm_cf_1795529594819_6ox50x", "object": "email", "status": "delivered", "provider": "cloudflare", "error": null }`}
+              {`{ "id": "pm_cf_1795529594819_6ox50x", "object": "email", "status": "delivered", "provider": "resend", "error": null }`}
             </div>
           </div>
 
@@ -354,12 +407,12 @@ func SendEmail(to string, subject string, html string) error {
                 <span className="px-2 py-0.5 rounded text-[11px] font-bold font-mono bg-blue-500/20 text-blue-400 border border-blue-500/30">
                   GET
                 </span>
-                <code className="text-sm font-semibold text-white">/api/v1/emails?limit=50</code>
+                <code className="text-sm font-semibold text-white">/api/v1/emails?q=&status=&provider=&limit=</code>
               </div>
-              <span className="text-xs text-slate-400">List recent emails</span>
+              <span className="text-xs text-slate-400">Search & list emails</span>
             </div>
             <p className="text-xs text-slate-300 leading-relaxed">
-              Retrieves a list of sent and failed messages ordered by newest first from Cloudflare D1.
+              Server-side search and filtering across recipient address, subject, status, and provider with total count and pagination metadata.
             </p>
           </div>
 
@@ -372,10 +425,10 @@ func SendEmail(to string, subject string, html string) error {
                 </span>
                 <code className="text-sm font-semibold text-white">/api/v1/emails/:id</code>
               </div>
-              <span className="text-xs text-slate-400">Email detail & delivery attempts</span>
+              <span className="text-xs text-slate-400">Detail & attempt hops</span>
             </div>
             <p className="text-xs text-slate-300 leading-relaxed">
-              Retrieves full message payload (including HTML body) and chronological delivery attempts.
+              Retrieves the full message payload (including HTML/text bodies) and chronological multi-provider delivery attempt records.
             </p>
           </div>
 
@@ -392,6 +445,54 @@ func SendEmail(to string, subject string, html string) error {
             </div>
             <p className="text-xs text-slate-300 leading-relaxed">
               Re-dispatches a previously failed message and appends a new attempt record in D1.
+            </p>
+          </div>
+
+          {/* GET /api/v1/emails/:id/eml */}
+          <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800/80 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <span className="px-2 py-0.5 rounded text-[11px] font-bold font-mono bg-purple-500/20 text-purple-400 border border-purple-500/30">
+                  GET
+                </span>
+                <code className="text-sm font-semibold text-white">/api/v1/emails/:id/eml</code>
+              </div>
+              <span className="text-xs text-slate-400">Download RFC-822 EML</span>
+            </div>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Streams the raw MIME RFC-822 email payload for testing in desktop email clients.
+            </p>
+          </div>
+
+          {/* GET /api/v1/stats */}
+          <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800/80 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <span className="px-2 py-0.5 rounded text-[11px] font-bold font-mono bg-sky-500/20 text-sky-400 border border-sky-500/30">
+                  GET
+                </span>
+                <code className="text-sm font-semibold text-white">/api/v1/stats</code>
+              </div>
+              <span className="text-xs text-slate-400">Telemetry & Quota Monitoring</span>
+            </div>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Returns 14-day delivery series, Resend quota status, and active provider failover state.
+            </p>
+          </div>
+
+          {/* Suppressions API */}
+          <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800/80 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <span className="px-2 py-0.5 rounded text-[11px] font-bold font-mono bg-rose-500/20 text-rose-400 border border-rose-500/30">
+                  CRUD
+                </span>
+                <code className="text-sm font-semibold text-white">/api/v1/suppressions</code>
+              </div>
+              <span className="text-xs text-slate-400">Bounce & Complaint Suppressions</span>
+            </div>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Manage blocked recipients to maintain pristine sender reputation across all Pitacs sending domains.
             </p>
           </div>
         </div>

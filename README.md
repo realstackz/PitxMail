@@ -46,32 +46,54 @@ The database auto-initializes tables and a default Pitacs live API key (`pm_live
 
 ## 📦 Using the TypeScript SDK
 
-You can drop `Pitxmail` directly into any other Pitacs project (e.g. Pitacs Hub, Trendkit):
+You can drop `Pitxmail` directly into any other Pitacs project (e.g. Pitacs Hub, Trendkit) as a native client or as a 100% drop-in replacement for existing Resend code:
 
 ```typescript
-import { Pitxmail } from "./lib/pitxmail";
+import { Pitxmail, Resend } from "pitxmail"; // or "@/lib/pitxmail"
 
+// Option 1: Native Pitxmail Client
 const pitxmail = new Pitxmail({
-  apiKey: process.env.PITXMAIL_API_KEY || "pm_live_default_pitacs_key_2026",
-  baseUrl: process.env.PITXMAIL_BASE_URL || "http://localhost:3000",
+  apiKey: process.env.PITXMAIL_API_KEY!,
+  baseUrl: process.env.PITXMAIL_BASE_URL || "https://mail.pitx.uk",
 });
 
-// Send an email
+// Send an email (auto-routed Resend -> Cloudflare failover)
 const { data, error } = await pitxmail.emails.send({
-  from: "Pitacs Notifications <noreply@pitacs.com>",
+  from: "PITACS Hub <noreply@pitacs.pitx.uk>",
   to: ["staff@pitacs.com"],
-  subject: "Overtime Claim Approved",
-  html: "<h2>Your overtime claim #104 has been approved.</h2>",
-  tags: {
-    system: "pitacs-hub",
-    category: "overtime",
-  },
+  subject: "Shift Confirmed",
+  html: "<h2>Your shift has been logged.</h2>",
+  replyTo: "support@pitacs.com",
+  tags: { system: "pitacs-hub", category: "attendance" },
 });
 
-if (error) {
-  console.error("Email failed:", error.message);
-} else {
-  console.log("Delivered message ID:", data.id);
+// Option 2: 100% Drop-In Replacement for Resend
+const resend = new Resend(process.env.PITXMAIL_API_KEY!);
+const res = await resend.emails.send({
+  from: "Pitacs Orders <orders@pitx.uk>",
+  to: "customer@example.com",
+  subject: "Order Confirmation",
+  html: "<strong>Confirmed!</strong>",
+  reply_to: "orders@pitx.uk",
+});
+```
+
+### Server-Side Email Search & Listing
+```typescript
+const { data, total, count } = await pitxmail.emails.list({
+  q: "staff@pitacs.com",
+  status: "delivered",
+  limit: 25,
+});
+```
+
+### Inspect Attempts & 1-Click Retry
+```typescript
+const detail = await pitxmail.emails.get("pm_cf_...");
+console.log("Delivery hops:", detail.attempts);
+
+if (detail.message.status === "failed") {
+  await pitxmail.emails.retry(detail.message.id);
 }
 ```
 
