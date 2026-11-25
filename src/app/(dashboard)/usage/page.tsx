@@ -15,6 +15,8 @@ import {
   Server,
   Zap,
 } from "lucide-react";
+import { RoutingStatus } from "@/components/RoutingStatus";
+import { VolumeChart } from "@/components/VolumeChart";
 
 interface StatsData {
   total: number;
@@ -23,6 +25,23 @@ interface StatsData {
   accepted: number;
   deliveryRate: string;
   volume24h: number;
+  resendToday?: number;
+  resendDailyLimit?: number;
+  resendMonth?: number;
+  resendMonthlyLimit?: number;
+  resendIsPaused?: boolean;
+  resendPausedUntil?: number | null;
+  resendPauseReason?: string | null;
+  activeProvider?: "resend" | "cloudflare";
+  providerBreakdown?: Record<string, number>;
+  series?: Array<{
+    date: number | string;
+    total: number;
+    delivered?: number;
+    failed: number;
+    resend: number;
+    cloudflare: number;
+  }>;
 }
 
 interface EmailItem {
@@ -154,16 +173,24 @@ export default function ApiUsagePage() {
           <p className="text-[11px] text-slate-400">{stats.delivered} delivered successfully</p>
         </div>
 
-        {/* Plan / Infrastructure */}
+        {/* Resend Daily Quota */}
         <div className="p-5 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2">
           <div className="flex items-center justify-between text-slate-400">
-            <span className="text-xs font-medium uppercase tracking-wider">Plan Status</span>
+            <span className="text-xs font-medium uppercase tracking-wider">Resend Daily Quota</span>
             <ShieldCheck className="w-4 h-4 text-purple-400" />
           </div>
-          <div className="text-2xl font-bold text-white">Active</div>
-          <p className="text-[11px] text-purple-300">Cloudflare Workers & D1</p>
+          <div className="text-2xl font-bold text-white">
+            {stats.resendToday ?? 0} <span className="text-sm font-normal text-slate-400">/ {stats.resendDailyLimit ?? 95}</span>
+          </div>
+          <p className="text-[11px] text-purple-300">Auto-failover to Cloudflare after cap</p>
         </div>
       </div>
+
+      {/* Routing & Resend / Cloudflare Quota Health */}
+      <RoutingStatus stats={stats} />
+
+      {/* 14-Day Delivery Volume Chart */}
+      <VolumeChart series={stats.series || []} loading={loading} />
 
       {/* Analytics Breakdown */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -174,7 +201,7 @@ export default function ApiUsagePage() {
               <Server className="w-4 h-4 text-blue-400" />
               <span>Volume by Sender Identity</span>
             </h2>
-            <span className="text-xs text-slate-400 font-mono">@pitx.uk</span>
+            <span className="text-xs text-slate-400 font-mono">@pitacs.pitx.uk / @pitx.uk</span>
           </div>
 
           <div className="space-y-3">
@@ -238,14 +265,35 @@ export default function ApiUsagePage() {
         </div>
       </div>
 
+      {/* Provider Breakdown */}
+      {stats.providerBreakdown && Object.keys(stats.providerBreakdown).length > 0 && (
+        <div className="p-6 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-bold text-white flex items-center space-x-2">
+              <Activity className="w-4 h-4 text-emerald-400" />
+              <span>Delivery Provider Breakdown</span>
+            </h2>
+            <span className="text-xs text-slate-400 font-mono">Resend Primary → Cloudflare Failover</span>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {Object.entries(stats.providerBreakdown).map(([prov, count]) => (
+              <div key={prov} className="p-3.5 rounded-xl bg-slate-950 border border-slate-800">
+                <div className="text-[11px] uppercase tracking-wider font-mono text-slate-400">{prov}</div>
+                <div className="text-xl font-bold text-white mt-1">{count}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Latency & SLA Guarantees */}
       <div className="p-6 rounded-2xl bg-gradient-to-r from-blue-950/40 via-slate-900/60 to-slate-900/60 border border-blue-900/40 space-y-3">
         <h3 className="text-sm font-bold text-white flex items-center space-x-2">
           <Zap className="w-4 h-4 text-blue-400" />
-          <span>Edge Infrastructure Performance</span>
+          <span>Hybrid Edge Infrastructure</span>
         </h3>
         <p className="text-xs text-slate-300 leading-relaxed">
-          Pitxmail executes transactional dispatches using Cloudflare Workers with direct connection to Cloudflare Email Sending. Dispatches average <strong>350ms - 600ms</strong> edge latency with <strong>0 queued cold starts</strong>. All delivery attempts and logs are immediately queryable in D1.
+          Pitxmail dispatches via <strong>Resend</strong> first (up to {stats.resendDailyLimit ?? 95}/day) and automatically fails over to <strong>Cloudflare Email Sending</strong> when the daily quota is reached or on any upstream error. All delivery attempts and logs are immediately queryable in D1.
         </p>
       </div>
     </div>

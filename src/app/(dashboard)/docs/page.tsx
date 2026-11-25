@@ -29,13 +29,13 @@ export default function DocsPage() {
 
   const agentPrompt = `You have access to the Pitxmail internal email infrastructure service for sending transactional emails.
 Base URL: https://mail.pitx.uk/api/v1
-Live API Key: pm_live_0d8678f8a9aa2f2a6b862a9ae5096fd7ffa9e6627d38583c
+Live API Key: pm_live_YOUR_API_KEY
 Verified Sender Domain: @pitx.uk (e.g., orders@pitx.uk, alerts@pitx.uk, noreply@pitx.uk)
 
 To send an email from your code:
 POST https://mail.pitx.uk/api/v1/emails
 Headers:
-  Authorization: Bearer pm_live_0d8678f8a9aa2f2a6b862a9ae5096fd7ffa9e6627d38583c
+  Authorization: Bearer pm_live_YOUR_API_KEY
   Content-Type: application/json
 Body:
 {
@@ -69,7 +69,7 @@ export async function sendEmail({
   text,
   from = "Pitacs Orders <orders@pitx.uk>",
 }: SendEmailPayload) {
-  const apiKey = process.env.PITXMAIL_API_KEY || "pm_live_0d8678f8a9aa2f2a6b862a9ae5096fd7ffa9e6627d38583c";
+  const apiKey = process.env.PITXMAIL_API_KEY || "pm_live_YOUR_API_KEY";
   const endpoint = process.env.PITXMAIL_URL || "https://mail.pitx.uk/api/v1/emails";
 
   const res = await fetch(endpoint, {
@@ -105,7 +105,7 @@ def send_pitxmail(
     text: str = "",
     from_addr: str = "Pitacs Orders <orders@pitx.uk>"
 ) -> dict:
-    api_key = os.getenv("PITXMAIL_API_KEY", "pm_live_0d8678f8a9aa2f2a6b862a9ae5096fd7ffa9e6627d38583c")
+    api_key = os.getenv("PITXMAIL_API_KEY", "pm_live_YOUR_API_KEY")
     url = os.getenv("PITXMAIL_URL", "https://mail.pitx.uk/api/v1/emails")
 
     headers = {
@@ -125,7 +125,7 @@ def send_pitxmail(
     return response.json()`;
 
   const curlCode = `curl -X POST https://mail.pitx.uk/api/v1/emails \\
-  -H "Authorization: Bearer pm_live_0d8678f8a9aa2f2a6b862a9ae5096fd7ffa9e6627d38583c" \\
+  -H "Authorization: Bearer pm_live_YOUR_API_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{
     "from": "Pitacs Orders <orders@pitx.uk>",
@@ -162,7 +162,7 @@ func SendEmail(to string, subject string, html string) error {
 
 	body, _ := json.Marshal(payload)
 	req, _ := http.NewRequest("POST", "https://mail.pitx.uk/api/v1/emails", bytes.NewBuffer(body))
-	req.Header.Set("Authorization", "Bearer pm_live_0d8678f8a9aa2f2a6b862a9ae5096fd7ffa9e6627d38583c")
+	req.Header.Set("Authorization", "Bearer pm_live_YOUR_API_KEY")
 	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{}

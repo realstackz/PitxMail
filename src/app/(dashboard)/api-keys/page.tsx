@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { formatUkDate } from "@/lib/date";
 import { Key, Plus, Trash2, Copy, Check, ShieldAlert, CheckCircle2, Clock } from "lucide-react";
 
 interface KeyItem {
@@ -30,7 +31,7 @@ export default function ApiKeysPage() {
       const res = await fetch("/api/v1/api-keys");
       if (res.ok) {
         const data = await res.json();
-        setKeys(data.keys || []);
+        setKeys(Array.isArray(data) ? data : data.keys || []);
       }
     } catch (err) {
       console.error("Failed to load API keys", err);
@@ -55,7 +56,7 @@ export default function ApiKeysPage() {
       });
       if (res.ok) {
         const data = await res.json();
-        setNewlyCreatedKey(data.key);
+        setNewlyCreatedKey(data.key || data.token);
         setKeyName("");
         loadKeys();
       } else {
@@ -200,12 +201,14 @@ export default function ApiKeysPage() {
                       </div>
                     </td>
                     <td className="py-3.5 px-4 font-mono text-slate-400">{k.keyPrefix}</td>
-                    <td className="py-3.5 px-4 font-mono text-[11px] text-slate-400">{k.scopes}</td>
+                    <td className="py-3.5 px-4 font-mono text-[11px] text-slate-400">
+                      {Array.isArray(k.scopes) ? k.scopes.join(", ") : k.scopes}
+                    </td>
                     <td className="py-3.5 px-4 text-slate-400">
-                      {k.lastUsedAt ? new Date(k.lastUsedAt).toLocaleDateString() : "Never"}
+                      {k.lastUsedAt ? formatUkDate(k.lastUsedAt) : "Never"}
                     </td>
                     <td className="py-3.5 px-4 text-slate-500">
-                      {new Date(k.createdAt).toLocaleDateString()}
+                      {formatUkDate(k.createdAt)}
                     </td>
                     <td className="py-3.5 px-4 text-right">
                       {!k.revokedAt && (

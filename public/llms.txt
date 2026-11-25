@@ -6,8 +6,8 @@
 - Base URL: https://mail.pitx.uk/api/v1
 - Fallback URL: https://pitxmail.pitacsdev.workers.dev/api/v1
 - Web Dashboard: https://mail.pitx.uk
-- Authentication: Bearer Token (Authorization: Bearer <API_KEY>)
-- Active API Key: pm_live_0d8678f8a9aa2f2a6b862a9ae5096fd7ffa9e6627d38583c
+- Authentication: Bearer Token (Authorization: Bearer <PITXMAIL_API_KEY>)
+- Generate API Keys: https://mail.pitx.uk/api-keys (requires admin login)
 - Allowed Senders: Any address ending with @pitx.uk (e.g. orders@pitx.uk, alerts@pitx.uk, noreply@pitx.uk)
 
 ## Core API Endpoints
@@ -93,7 +93,7 @@ export async function sendEmail({
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.PITXMAIL_API_KEY || "pm_live_0d8678f8a9aa2f2a6b862a9ae5096fd7ffa9e6627d38583c"}`,
+      Authorization: `Bearer ${process.env.PITXMAIL_API_KEY}`,
     },
     body: JSON.stringify({
       from,

@@ -2,8 +2,10 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { formatUkDateTime } from "@/lib/date";
 import {
   Send,
+  Mail,
   CheckCircle2,
   AlertCircle,
   Clock,
@@ -13,6 +15,8 @@ import {
   Terminal,
   RefreshCw,
 } from "lucide-react";
+import { RoutingStatus } from "@/components/RoutingStatus";
+import { VolumeChart } from "@/components/VolumeChart";
 
 interface StatsData {
   total: number;
@@ -21,6 +25,23 @@ interface StatsData {
   accepted: number;
   deliveryRate: string;
   volume24h: number;
+  resendToday?: number;
+  resendDailyLimit?: number;
+  resendMonth?: number;
+  resendMonthlyLimit?: number;
+  resendIsPaused?: boolean;
+  resendPausedUntil?: number | null;
+  resendPauseReason?: string | null;
+  activeProvider?: "resend" | "cloudflare";
+  providerBreakdown?: Record<string, number>;
+  series?: Array<{
+    date: number | string;
+    total: number;
+    delivered?: number;
+    failed: number;
+    resend: number;
+    cloudflare: number;
+  }>;
 }
 
 interface MessageItem {
@@ -47,51 +68,35 @@ export default function OverviewPage() {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [statsRes, emailsRes, remoteEmailsRes] = await Promise.all([
+      const [statsRes, emailsRes] = await Promise.all([
         fetch("/api/v1/stats"),
         fetch("/api/v1/emails?limit=10"),
-        fetch("/api/v1/remote-emails?limit=10").catch(() => null),
       ]);
-
-      let localItems: MessageItem[] = [];
-      let remoteItems: MessageItem[] = [];
 
       if (emailsRes.ok) {
         const emailsJson = await emailsRes.json();
-        localItems = emailsJson.data || [];
+        setRecentEmails((emailsJson.data || []).slice(0, 8));
       }
-
-      if (remoteEmailsRes && remoteEmailsRes.ok) {
-        const remoteJson = await remoteEmailsRes.json();
-        remoteItems = remoteJson.data || [];
-      }
-
-      // Merge and sort by timestamp
-      const combined = [...localItems, ...remoteItems].sort(
-        (a, b) => b.createdAt - a.createdAt
-      );
-      setRecentEmails(combined.slice(0, 8));
 
       if (statsRes.ok) {
         const statsJson = await statsRes.json();
-        const remoteCount = remoteItems.length;
-        const remoteFailed = remoteItems.filter((m) => m.status === "failed").length;
-        const remoteDelivered = remoteItems.filter(
-          (m) => m.status === "delivered" || m.status === "submitted"
-        ).length;
-
-        const total = statsJson.total + remoteCount;
-        const delivered = statsJson.delivered + remoteDelivered;
-        const failed = statsJson.failed + remoteFailed;
-        const deliveryRate = total > 0 ? ((delivered / total) * 100).toFixed(1) : "100.0";
-
         setStats({
-          total,
-          delivered,
-          failed,
-          accepted: statsJson.accepted,
-          deliveryRate: `${deliveryRate}%`,
-          volume24h: statsJson.volume24h + remoteCount,
+          total: statsJson.total ?? 0,
+          delivered: statsJson.delivered ?? 0,
+          failed: statsJson.failed ?? 0,
+          accepted: statsJson.accepted ?? 0,
+          deliveryRate: statsJson.deliveryRate || "100.0%",
+          volume24h: statsJson.volume24h ?? 0,
+          resendToday: statsJson.resendToday ?? 0,
+          resendDailyLimit: statsJson.resendDailyLimit ?? 95,
+          resendMonth: statsJson.resendMonth ?? 0,
+          resendMonthlyLimit: statsJson.resendMonthlyLimit ?? 3000,
+          resendIsPaused: statsJson.resendIsPaused ?? false,
+          resendPausedUntil: statsJson.resendPausedUntil,
+          resendPauseReason: statsJson.resendPauseReason,
+          activeProvider: statsJson.activeProvider || "resend",
+          providerBreakdown: statsJson.providerBreakdown || {},
+          series: statsJson.series || [],
         });
       }
     } catch (err) {
@@ -188,6 +193,12 @@ export default function OverviewPage() {
         </div>
       </div>
 
+      {/* Hybrid Routing & Failover Status */}
+      <RoutingStatus stats={stats} />
+
+      {/* 14-Day Volume Chart */}
+      <VolumeChart series={stats.series || []} loading={loading} />
+
       {/* Quick Setup Actions */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Link
@@ -283,35 +294,55 @@ export default function OverviewPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60">
-                {recentEmails.map((item) => (
-                  <tr key={item.id} className="hover:bg-slate-800/30 transition">
-                    <td className="py-3.5 px-4 whitespace-nowrap">
-                      <span
-                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium border ${
-                          item.status === "delivered" || item.status === "submitted"
-                            ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
-                            : item.status === "failed"
-                            ? "bg-rose-500/10 text-rose-400 border-rose-500/20"
-                            : "bg-amber-500/10 text-amber-400 border-amber-500/20"
-                        }`}
-                      >
-                        {item.status}
-                      </span>
-                    </td>
-                    <td className="py-3.5 px-4 font-mono font-medium text-slate-200">
-                      {item.toAddress}
-                    </td>
-                    <td className="py-3.5 px-4 truncate max-w-xs text-slate-300">
-                      {item.subject}
-                    </td>
-                    <td className="py-3.5 px-4 uppercase text-[10px] text-slate-400 font-mono">
-                      {item.provider || "native"}
-                    </td>
-                    <td className="py-3.5 px-4 text-slate-500 whitespace-nowrap">
-                      {new Date(item.createdAt).toLocaleTimeString()}
-                    </td>
-                  </tr>
-                ))}
+                {recentEmails.map((item) => {
+                  const isDelivered = item.status === "delivered" || item.status === "submitted";
+                  const isFailed = item.status === "failed" || item.status === "bounced";
+
+                  return (
+                    <tr key={item.id} className="hover:bg-slate-800/30 transition">
+                      <td className="py-3.5 px-4 whitespace-nowrap">
+                        <span
+                          className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider border ${
+                            isDelivered
+                              ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                              : isFailed
+                              ? "bg-rose-500/10 text-rose-400 border-rose-500/20"
+                              : "bg-amber-500/10 text-amber-400 border-amber-500/20"
+                          }`}
+                        >
+                          {item.status}
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-4 font-mono font-medium text-slate-200">
+                        <div className="flex items-center space-x-2.5">
+                          <div
+                            className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 border ${
+                              isDelivered
+                                ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
+                                : isFailed
+                                ? "bg-rose-500/10 border-rose-500/30 text-rose-400"
+                                : "bg-amber-500/10 border-amber-500/30 text-amber-400"
+                            }`}
+                          >
+                            <Mail className="w-3 h-3" />
+                          </div>
+                          <span className="truncate max-w-[200px]">{item.toAddress}</span>
+                        </div>
+                      </td>
+                      <td className="py-3.5 px-4 truncate max-w-xs text-slate-300">
+                        {item.subject}
+                      </td>
+                      <td className="py-3.5 px-4 uppercase text-[10px] text-slate-400 font-mono">
+                        <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700/50">
+                          {item.provider || "native"}
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-4 text-slate-400 whitespace-nowrap font-mono text-[11px]">
+                        {formatUkDateTime(item.createdAt)}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

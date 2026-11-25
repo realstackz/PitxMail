@@ -36,43 +36,30 @@ export default function PlaygroundPage() {
     setResult(null);
 
     try {
-      if (dispatchTarget === "cloudflare") {
-        const res = await fetch("/api/v1/edge-send", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
+      const res = await fetch("/api/v1/emails", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          from,
+          to,
+          subject,
+          html,
+          text: "Dispatched from Pitxmail Playground.",
+          tags: {
+            environment: dispatchTarget === "cloudflare" ? "cloudflare_live" : "playground",
+            source: "dashboard",
           },
-          body: JSON.stringify({
-            from,
-            to,
-            subject,
-            html,
-            text: "Testing dispatch via Cloudflare live worker edge.",
-            tags: { environment: "cloudflare_live", source: "playground" },
-          }),
-        });
-        const data = await res.json();
-        setResult({ ok: res.ok, status: res.status, target: "Cloudflare Edge", data });
-      } else {
-        const defaultKey = "pm_live_default_pitacs_key_2026";
-        const res = await fetch("/api/v1/emails", {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${defaultKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            from,
-            to,
-            subject,
-            html,
-            tags: { environment: "playground", source: "dashboard" },
-          }),
-        });
-
-        const data = await res.json();
-        setResult({ ok: res.ok, status: res.status, target: "Local Engine", data });
-      }
+        }),
+      });
+      const data = await res.json();
+      setResult({
+        ok: res.ok,
+        status: res.status,
+        target: dispatchTarget === "cloudflare" ? "Cloudflare Edge" : "Edge API",
+        data,
+      });
     } catch (err: any) {
       setResult({ ok: false, error: err.message });
     } finally {
