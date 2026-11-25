@@ -42,6 +42,34 @@ async function dispatchWithFailover(
   const dailyLimit = Number(env.RESEND_DAILY_LIMIT || 90);
   const monthlyLimit = Number(env.RESEND_MONTHLY_LIMIT || 2850);
 
+  // 0. Pre-Flight Suppression Guard: block known bad/bounced recipients before touching mail servers
+  for (const recipient of params.recipients) {
+    const cleanRec = recipient.trim().toLowerCase();
+    try {
+      const sup: any = await env.DB.prepare(
+        "SELECT reason FROM suppressions WHERE lower(email) = ? LIMIT 1"
+      )
+        .bind(cleanRec)
+        .first();
+      if (sup) {
+        return {
+          status: "failed",
+          provider: "cloudflare",
+          providerMessageId: null,
+          errorReason: `Recipient '${cleanRec}' is suppressed (${sup.reason}). Dispatch aborted to protect domain sending reputation.`,
+          attempts: [{
+            provider: "cloudflare",
+            status: "failed",
+            errorMessage: `Recipient '${cleanRec}' is suppressed (${sup.reason})`,
+            providerResponse: null,
+            startedAt: Date.now(),
+            finishedAt: Date.now(),
+          }],
+        };
+      }
+    } catch {}
+  }
+
   // 1. Primary: Resend (free daily/monthly tier) if configured, not paused, and under caps
   if (env.RESEND_API_KEY) {
     let canUseResend = true;
@@ -175,6 +203,24 @@ async function dispatchWithFailover(
     } catch (cfErr: any) {
       cfStatus = "failed";
       cfError = cfErr.message;
+      // Auto-suppress any recipient that triggers a Cloudflare bounce or suppression error
+      if (/suppress|bounce|spam|reject|not a verified|not found|550|invalid|disabled/i.test(cfErr.message || "")) {
+        try {
+          const now = Date.now();
+          for (const recipient of params.recipients) {
+            await env.DB.prepare(
+              "INSERT OR REPLACE INTO suppressions (id, organisation_id, email, reason, created_at) VALUES (?, 'org_pitacs', ?, ?, ?)"
+            )
+              .bind(
+                `sup_${now}_${Math.random().toString(36).slice(2, 6)}`,
+                recipient.trim().toLowerCase(),
+                `cloudflare_auto: ${String(cfErr.message || "").slice(0, 120)}`,
+                now
+              )
+              .run();
+          }
+        } catch {}
+      }
     }
   }
   attempts.push({
@@ -1881,16 +1927,18 @@ export default {
           );
         }
 
-        // Check suppressions list
+        // Check suppressions list (global domain protection)
         for (const recipient of recipients) {
           const suppressed: any = await env.DB.prepare(
-            "SELECT reason FROM suppressions WHERE organisation_id = ? AND lower(email) = ? LIMIT 1"
+            "SELECT reason FROM suppressions WHERE lower(email) = ? LIMIT 1"
           )
-            .bind(auth!.organisationId, recipient.toLowerCase())
+            .bind(recipient.toLowerCase())
             .first();
           if (suppressed) {
             return new Response(
-              JSON.stringify({ error: `Recipient '${recipient}' is suppressed (${suppressed.reason})` }),
+              JSON.stringify({
+                error: `Recipient '${recipient}' is suppressed (${suppressed.reason}). Halted before dispatch to protect domain reputation.`,
+              }),
               { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } }
             );
           }
