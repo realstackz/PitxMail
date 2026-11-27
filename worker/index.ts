@@ -381,6 +381,36 @@ function parseEmailAddress(raw: string): { address: string; name?: string } {
   return { address: String(raw).trim().toLowerCase() };
 }
 
+// 1x1 Transparent GIF representation (43 bytes) for open tracking
+const TRANSPARENT_1X1_GIF_B64 = "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+
+function getTransparentGifResponse(): Response {
+  const bin = atob(TRANSPARENT_1X1_GIF_B64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) {
+    bytes[i] = bin.charCodeAt(i);
+  }
+  return new Response(bytes, {
+    status: 200,
+    headers: {
+      "Content-Type": "image/gif",
+      "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0",
+      "Pragma": "no-cache",
+      "Expires": "0",
+      "Access-Control-Allow-Origin": "*",
+    },
+  });
+}
+
+function injectTrackingPixel(html: string, messageId: string, origin = "https://mail.pitx.uk"): string {
+  const pixel = `<img src="${origin}/api/v1/track/open/${messageId}.png" width="1" height="1" alt="" style="display:none;width:1px;height:1px;border:0;" />`;
+  if (!html || !html.trim()) return pixel;
+  if (html.includes("</body>")) {
+    return html.replace("</body>", `${pixel}</body>`);
+  }
+  return `${html}${pixel}`;
+}
+
 async function getSessionUser(request: Request, env: Env): Promise<any | null> {
   const authHeader = request.headers.get("Authorization") || "";
   let token: string | null = null;
@@ -677,6 +707,49 @@ export default {
                   { name: "until", in: "query", description: "Unix ms upper bound", schema: { type: "integer" } },
                 ],
                 responses: { "200": { description: "List of messages" } },
+              },
+            },
+            "/emails/batch": {
+              post: {
+                summary: "Dispatch a batch of emails (up to 100 in a single call)",
+                operationId: "sendBatchEmails",
+                requestBody: {
+                  required: true,
+                  content: {
+                    "application/json": {
+                      schema: {
+                        type: "array",
+                        items: {
+                          type: "object",
+                          required: ["from", "to", "subject"],
+                          properties: {
+                            from: { type: "string", example: "Pitacs Orders <orders@pitx.uk>" },
+                            to: { type: "array", items: { type: "string" }, example: ["customer@example.com"] },
+                            subject: { type: "string", example: "Order Confirmation" },
+                            html: { type: "string", example: "<h1>Order Confirmed</h1>" },
+                            text: { type: "string", example: "Order Confirmed" },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+                responses: {
+                  "200": { description: "Batch processed; returns array of email result objects" },
+                  "400": { description: "Invalid payload or exceeds 100 items" },
+                },
+              },
+            },
+            "/track/open/{id}": {
+              get: {
+                summary: "Public read-receipt tracking pixel (1x1 transparent GIF)",
+                operationId: "trackEmailOpen",
+                parameters: [
+                  { name: "id", in: "path", required: true, description: "Message ID", schema: { type: "string" } },
+                ],
+                responses: {
+                  "200": { description: "1x1 transparent GIF returned; opened_at timestamp updated" },
+                },
               },
             },
             "/emails/{id}": {
@@ -1018,6 +1091,25 @@ export default {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
+    }
+
+    // ==========================================
+    // PUBLIC OPEN TRACKING PIXEL (Read Receipts)
+    // No auth required: email clients fetch images without auth headers
+    // ==========================================
+    const trackOpenMatch = url.pathname.match(/^\/api\/v1\/track\/open\/([^/]+?)(?:\.(?:png|gif))?$/);
+    if (trackOpenMatch && request.method === "GET") {
+      const messageId = decodeURIComponent(trackOpenMatch[1]);
+      if (env.DB) {
+        try {
+          await env.DB.prepare(
+            "UPDATE messages SET opened_at = ? WHERE id = ? AND opened_at IS NULL"
+          ).bind(Date.now(), messageId).run();
+        } catch (trackErr: any) {
+          console.error("Open tracking error:", trackErr.message);
+        }
+      }
+      return getTransparentGifResponse();
     }
 
     // ==========================================
@@ -1494,7 +1586,7 @@ export default {
           .first();
         const { results } = await env.DB.prepare(
           `SELECT id, from_address, from_name, to_address, cc_address, bcc_address, reply_to, subject, status, provider,
-                  provider_message_id, error_reason, retry_count, created_at, updated_at
+                  provider_message_id, error_reason, retry_count, created_at, updated_at, opened_at
            FROM messages WHERE ${whereSql} ORDER BY created_at DESC LIMIT ? OFFSET ?`
         )
           .bind(...binds, limit, offset)
@@ -1516,6 +1608,7 @@ export default {
           retryCount: m.retry_count ?? 0,
           createdAt: m.created_at,
           updatedAt: m.updated_at,
+          openedAt: m.opened_at ?? null,
         }));
         const totalCount = Number(totalRow?.count || 0);
 
@@ -1581,6 +1674,7 @@ export default {
           createdAt: msg.created_at,
           updatedAt: msg.updated_at,
           deliveredAt: msg.delivered_at ?? null,
+          openedAt: msg.opened_at ?? null,
           tags: (() => {
             try {
               return msg.tags ? JSON.parse(msg.tags) : null;
@@ -2021,6 +2115,9 @@ export default {
           },
         ];
 
+        // Inject open tracking pixel into HTML if html is provided
+        const finalHtml = body.html ? injectTrackingPixel(body.html, msgId) : "";
+
         if (!isSandbox) {
           const dispatch = await dispatchWithFailover(env, {
             fromAddr,
@@ -2031,7 +2128,7 @@ export default {
             replyTo,
             subject: body.subject,
             text: body.text || "",
-            html: body.html || "",
+            html: finalHtml,
           });
           deliveryStatus = dispatch.status;
           providerName = dispatch.provider;
@@ -2061,7 +2158,7 @@ export default {
                 bccList,
                 replyTo,
                 body.subject,
-                body.html || "",
+                finalHtml,
                 body.text || "",
                 deliveryStatus,
                 providerName,
@@ -2132,6 +2229,262 @@ export default {
       }
     }
 
+    // 11. POST /api/v1/emails/batch (Resend-compatible batch dispatch, up to 100 emails)
+    if (url.pathname === "/api/v1/emails/batch" && request.method === "POST") {
+      if (!hasScope(auth!, "emails:send")) {
+        return new Response(JSON.stringify({ error: "Insufficient API key scope (requires emails:send)" }), {
+          status: 403,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      try {
+        const body: any = await request.json();
+        const batchItems: any[] = Array.isArray(body)
+          ? body
+          : (Array.isArray(body?.emails) ? body.emails : (Array.isArray(body?.data) ? body.data : []));
+
+        if (!Array.isArray(batchItems) || batchItems.length === 0) {
+          return new Response(
+            JSON.stringify({ error: "Invalid batch payload: provide an array of 1 to 100 email objects" }),
+            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+        if (batchItems.length > 100) {
+          return new Response(
+            JSON.stringify({ error: "Batch limit exceeded: maximum 100 emails per batch request" }),
+            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        const isSandbox = (request.headers.get("Authorization") || "").startsWith("Bearer pm_test_");
+        const results: Array<{ id: string; object: "email"; status?: string; provider?: string; error?: string | null }> = [];
+
+        // Preload verified domains for fast lookup
+        const { results: orgDomains } = await env.DB.prepare(
+          "SELECT domain, verification_status FROM domains WHERE organisation_id = ?"
+        ).bind(auth!.organisationId).all();
+        const verifiedDomainSet = new Set(
+          (orgDomains || [])
+            .filter((d: any) => d.verification_status === "verified")
+            .map((d: any) => d.domain.toLowerCase())
+        );
+
+        // Preload suppressions for domain reputation guard
+        const { results: allSuppressions } = await env.DB.prepare(
+          "SELECT email, reason FROM suppressions"
+        ).all();
+        const suppressionMap = new Map<string, string>();
+        for (const s of allSuppressions || []) {
+          suppressionMap.set(String(s.email).toLowerCase(), s.reason || "suppressed");
+        }
+
+        const now = Date.now();
+
+        for (let i = 0; i < batchItems.length; i++) {
+          const item = batchItems[i];
+          const itemMsgId = `pm_cf_${now}_${i}_${Math.random().toString(36).slice(2, 7)}`;
+
+          if (!item.to || !item.subject) {
+            results.push({
+              id: itemMsgId,
+              object: "email",
+              status: "failed",
+              provider: "none",
+              error: "Missing required fields (to, subject)",
+            });
+            continue;
+          }
+
+          const rawFrom = item.from || "Pitacs Hub <noreply@pitacs.pitx.uk>";
+          let { address: fromAddr, name: fromName } = parseEmailAddress(rawFrom);
+          if (!isValidEmail(fromAddr)) {
+            results.push({
+              id: itemMsgId,
+              object: "email",
+              status: "failed",
+              provider: "none",
+              error: "Invalid 'from' email address",
+            });
+            continue;
+          }
+
+          let fromDomain = fromAddr.split("@")[1]?.toLowerCase();
+          let autoReplyTo: string | null = null;
+          if (!verifiedDomainSet.has(fromDomain)) {
+            const localPart = (fromAddr.split("@")[0] || "noreply").replace(/[^a-z0-9._+-]/gi, "") || "noreply";
+            autoReplyTo = fromAddr;
+            fromAddr = `${localPart}@pitacs.pitx.uk`;
+            fromName = fromName || "Pitacs Hub";
+            fromDomain = "pitacs.pitx.uk";
+          }
+
+          const rawRecipients = Array.isArray(item.to)
+            ? item.to
+            : String(item.to).split(",").map((s: string) => s.trim()).filter(Boolean);
+          const recipients = rawRecipients.map((r: string) => parseEmailAddress(r).address);
+
+          if (recipients.length === 0 || recipients.some((r: string) => !isValidEmail(r))) {
+            results.push({
+              id: itemMsgId,
+              object: "email",
+              status: "failed",
+              provider: "none",
+              error: "Invalid recipients in 'to'",
+            });
+            continue;
+          }
+
+          // Check suppressions
+          let isSuppressed = false;
+          let supReason = "";
+          for (const rec of recipients) {
+            if (suppressionMap.has(rec.toLowerCase())) {
+              isSuppressed = true;
+              supReason = suppressionMap.get(rec.toLowerCase())!;
+              break;
+            }
+          }
+
+          if (isSuppressed) {
+            results.push({
+              id: itemMsgId,
+              object: "email",
+              status: "failed",
+              provider: "cloudflare",
+              error: `Recipient suppressed (${supReason})`,
+            });
+            continue;
+          }
+
+          const normalizedTo = recipients.join(", ");
+          const ccArr = item.cc ? (Array.isArray(item.cc) ? item.cc : [item.cc]).map((r: string) => parseEmailAddress(r).address) : null;
+          const bccArr = item.bcc ? (Array.isArray(item.bcc) ? item.bcc : [item.bcc]).map((r: string) => parseEmailAddress(r).address) : null;
+          const ccList = ccArr ? ccArr.join(", ") : null;
+          const bccList = bccArr ? bccArr.join(", ") : null;
+          const replyTo = item.reply_to
+            ? parseEmailAddress(item.reply_to).address
+            : item.replyTo
+            ? parseEmailAddress(item.replyTo).address
+            : autoReplyTo;
+
+          // Inject open tracking pixel into HTML
+          const finalHtml = item.html ? injectTrackingPixel(item.html, itemMsgId) : "";
+
+          let deliveryStatus: string = "simulated";
+          let providerName: string = "sandbox";
+          let providerMessageId: string | null = null;
+          let errorReason: string | null = null;
+          let attemptsToSave: DeliveryAttemptRecord[] = [
+            {
+              provider: "sandbox",
+              status: "success",
+              errorMessage: null,
+              providerResponse: null,
+              startedAt: now,
+              finishedAt: Date.now(),
+            },
+          ];
+
+          if (!isSandbox) {
+            const dispatch = await dispatchWithFailover(env, {
+              fromAddr,
+              fromName,
+              recipients,
+              cc: ccArr,
+              bcc: bccArr,
+              replyTo,
+              subject: item.subject,
+              text: item.text || "",
+              html: finalHtml,
+            });
+            deliveryStatus = dispatch.status;
+            providerName = dispatch.provider;
+            providerMessageId = dispatch.providerMessageId;
+            errorReason = dispatch.errorReason;
+            attemptsToSave = dispatch.attempts;
+          }
+
+          if (env.DB) {
+            try {
+              await env.DB.prepare(
+                `INSERT INTO messages (
+                  id, organisation_id, project_id, from_address, from_name, to_address,
+                  cc_address, bcc_address, reply_to, subject, html_body, text_body,
+                  status, provider, provider_message_id, error_reason, idempotency_key, tags, metadata,
+                  created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+              )
+                .bind(
+                  itemMsgId,
+                  auth!.organisationId,
+                  auth!.projectId,
+                  fromAddr,
+                  fromName || null,
+                  normalizedTo,
+                  ccList,
+                  bccList,
+                  replyTo,
+                  item.subject,
+                  finalHtml,
+                  item.text || "",
+                  deliveryStatus,
+                  providerName,
+                  providerMessageId,
+                  errorReason,
+                  null,
+                  item.tags ? JSON.stringify(item.tags) : null,
+                  item.metadata ? JSON.stringify(item.metadata) : null,
+                  now,
+                  now
+                )
+                .run();
+
+              for (let a = 0; a < attemptsToSave.length; a++) {
+                const att = attemptsToSave[a];
+                await env.DB.prepare(
+                  `INSERT INTO delivery_attempts (
+                    id, message_id, attempt_number, provider, status, error_message, provider_response, started_at, finished_at
+                  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                )
+                  .bind(
+                    `att_${att.finishedAt}_${Math.random().toString(36).slice(2, 6)}`,
+                    itemMsgId,
+                    a + 1,
+                    att.provider,
+                    att.status,
+                    att.errorMessage,
+                    att.providerResponse,
+                    att.startedAt,
+                    att.finishedAt
+                  )
+                  .run();
+              }
+            } catch (dbErr: any) {
+              console.error("Batch item persistence error:", dbErr.message);
+            }
+          }
+
+          results.push({
+            id: itemMsgId,
+            object: "email",
+            status: deliveryStatus,
+            provider: providerName,
+            error: errorReason,
+          });
+        }
+
+        return new Response(JSON.stringify({ data: results }), {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      } catch (err: any) {
+        return new Response(
+          JSON.stringify({ error: err.message || "Failed to process email batch" }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+    }
+
     // Static asset fallback (serves Next.js dashboard SPA from ./out)
     if (env.ASSETS && typeof env.ASSETS.fetch === "function") {
       return env.ASSETS.fetch(request);
@@ -2142,6 +2495,8 @@ export default {
         service: "Pitxmail Cloudflare Worker Edge API",
         endpoints: {
           send: "POST /api/v1/emails",
+          batch: "POST /api/v1/emails/batch",
+          track: "GET /api/v1/track/open/:id",
           list: "GET /api/v1/emails",
           detail: "GET /api/v1/emails/:id",
           retry: "POST /api/v1/emails/:id/retry",

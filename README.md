@@ -8,7 +8,8 @@
 ## 🚀 Features
 
 - **Zero External Subscription Costs:** Runs 100% on Cloudflare's $5 Workers plan using **Cloudflare Email Sending** (`send_email` binding) and **Cloudflare D1** SQLite on the edge.
-- **Drop-in Resend Compatibility:** Simple REST API (`POST /api/v1/emails`) and TypeScript SDK with familiar syntax.
+- **Drop-in Resend Compatibility:** Simple REST API (`POST /api/v1/emails`), batch sending (`POST /api/v1/emails/batch` up to 100 emails/request), and TypeScript SDK with familiar syntax (`client.batch.send(...)`).
+- **Read Receipts & Open Tracking:** Built-in transparent 1x1 GIF tracking pixel injection (`GET /api/v1/track/open/:id`), D1 `opened_at` audit logging, and dashboard read badges.
 - **Delivery Visibility & 1-Click Retry:** Real-time log of every email sent, recipient address, delivery attempts, error traces, HTML/text previews, and a 1-click retry engine for failed dispatches.
 - **Multi-Tenant Foundation from Day 1:** Logical isolation by Organizations, Projects, Domains, and scoped API keys (`pm_live_...`, `pm_test_...`).
 - **Interactive Dashboard:** Modern dark-mode UI with Overview analytics, Outbound email inspector, Sending Domains DNS verification (SPF, DKIM, DMARC), API Keys manager, and live Email Playground.
@@ -158,6 +159,42 @@ Idempotency-Key: optional-uuid-v4
   "created_at": "2026-11-24T10:48:00.000Z"
 }
 ```
+
+### Send Batch Emails (Up to 100 in one request)
+`POST /api/v1/emails/batch`
+
+**Body:** Array of email objects:
+```json
+[
+  {
+    "from": "Pitacs Orders <orders@pitacs.pitx.uk>",
+    "to": "customer1@example.com",
+    "subject": "Order #1 Dispatched",
+    "html": "<p>Your order #1 is on the way!</p>"
+  },
+  {
+    "from": "Pitacs Orders <orders@pitacs.pitx.uk>",
+    "to": "customer2@example.com",
+    "subject": "Order #2 Dispatched",
+    "html": "<p>Your order #2 is on the way!</p>"
+  }
+]
+```
+
+**Response (200 OK):**
+```json
+{
+  "data": [
+    { "id": "pm_cf_1795604129010_0_a8f9", "object": "email", "status": "delivered", "provider": "resend" },
+    { "id": "pm_cf_1795604129010_1_b3c2", "object": "email", "status": "delivered", "provider": "resend" }
+  ]
+}
+```
+
+### Public Open Tracking Pixel (Read Receipt)
+`GET /api/v1/track/open/:id` or `/api/v1/track/open/:id.png`
+
+Returns an un-cached 1x1 transparent GIF (`image/gif`) and records `opened_at` timestamp in D1 for read receipts.
 
 ### Retry Failed Email
 `POST /api/v1/emails/:id/retry`

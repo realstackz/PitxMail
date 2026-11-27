@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS messages (
   metadata TEXT,
   scheduled_at INTEGER,
   delivered_at INTEGER,
+  opened_at INTEGER,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );

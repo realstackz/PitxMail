@@ -25,6 +25,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ArrowRightLeft,
+  Eye,
 } from "lucide-react";
 
 const PAGE_SIZE = 40;
@@ -48,6 +49,7 @@ interface EmailMessage {
   createdAt: number;
   updatedAt: number;
   deliveredAt?: number | null;
+  openedAt?: number | null;
   tags?: any;
   metadata?: any;
 }
@@ -631,12 +633,23 @@ export default function EmailsPage() {
                         </div>
                       </td>
                       <td className="py-3.5 px-4">
-                        <span
-                          className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider border ${tone.pill}`}
-                          title={msg.errorReason || undefined}
-                        >
-                          {msg.status}
-                        </span>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span
+                            className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider border ${tone.pill}`}
+                            title={msg.errorReason || undefined}
+                          >
+                            {msg.status}
+                          </span>
+                          {msg.openedAt && (
+                            <span
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                              title={`Opened: ${formatUkDateTime(msg.openedAt)}`}
+                            >
+                              <Eye className="w-3 h-3" />
+                              Opened
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="py-3.5 px-4 font-mono text-[10px] uppercase">
                         <span
@@ -798,6 +811,17 @@ export default function EmailsPage() {
                 <span className="text-[10px] uppercase font-bold tracking-wider text-neutral-500 block">Sent (UK)</span>
                 <span className="font-mono text-neutral-300 block mt-0.5">{formatUkDateTime(selectedEmail.createdAt)}</span>
               </div>
+              <div>
+                <span className="text-[10px] uppercase font-bold tracking-wider text-neutral-500 block">Read Receipt</span>
+                {selectedEmail.openedAt ? (
+                  <span className="inline-flex items-center gap-1 font-mono text-emerald-400 block mt-0.5" title="Tracking pixel loaded">
+                    <Eye className="w-3 h-3 shrink-0" />
+                    {formatUkDateTime(selectedEmail.openedAt)}
+                  </span>
+                ) : (
+                  <span className="font-mono text-neutral-500 block mt-0.5">Unopened</span>
+                )}
+              </div>
               {selectedEmail.replyTo && (
                 <div className="min-w-0">
                   <span className="text-[10px] uppercase font-bold tracking-wider text-neutral-500 block">Reply-To</span>
@@ -918,6 +942,19 @@ export default function EmailsPage() {
                     <div className="text-xs">
                       <span className="font-semibold text-white">Delivered to inbox (confirmed by webhook)</span>
                       <span className="text-[11px] text-neutral-500 ml-2 font-mono">{formatUkDateTime(selectedEmail.deliveredAt)}</span>
+                    </div>
+                  </div>
+                )}
+
+                {selectedEmail.openedAt && (
+                  <div className="relative">
+                    <div className="absolute -left-[31px] top-0.5 w-3.5 h-3.5 rounded-full bg-emerald-400 border-2 border-black" />
+                    <div className="text-xs">
+                      <span className="font-semibold text-emerald-400 flex items-center gap-1.5">
+                        <Eye className="w-3.5 h-3.5" />
+                        Opened by recipient (read receipt)
+                      </span>
+                      <span className="text-[11px] text-neutral-500 ml-5 font-mono">{formatUkDateTime(selectedEmail.openedAt)}</span>
                     </div>
                   </div>
                 )}

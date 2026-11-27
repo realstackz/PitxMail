@@ -12,6 +12,8 @@ Pitxmail is Pitacs' high-reliability transactional email infrastructure built on
 | **API Base URL** | `https://mail.pitx.uk/api/v1` |
 | **Fallback URL** | `https://pitxmail.pitacsdev.workers.dev/api/v1` |
 | **Send Email** | `POST https://mail.pitx.uk/api/v1/emails` |
+| **Send Batch Emails** | `POST https://mail.pitx.uk/api/v1/emails/batch` (Up to 100 emails) |
+| **Open Tracking Pixel** | `GET https://mail.pitx.uk/api/v1/track/open/:id` (Public 1x1 GIF) |
 | **List Emails** | `GET https://mail.pitx.uk/api/v1/emails` |
 | **Email Detail** | `GET https://mail.pitx.uk/api/v1/emails/:id` |
 | **Retry Email** | `POST https://mail.pitx.uk/api/v1/emails/:id/retry` |
@@ -69,6 +71,46 @@ if (error) {
   console.error("Failed to send:", error.message);
 } else {
   console.log("Sent successfully! Message ID:", data.id);
+}
+```
+
+### Batch Sending (Up to 100 emails in a single API call)
+
+Pitxmail provides 100% Resend drop-in compatibility for batch sending via `client.batch.send(...)` or `resend.batch.send(...)`:
+
+```typescript
+const { data, error } = await client.batch.send([
+  {
+    from: "PITACS Orders <orders@pitacs.pitx.uk>",
+    to: "customer1@example.com",
+    subject: "Order #1 Dispatched",
+    html: "<p>Your order #1 has been dispatched.</p>",
+  },
+  {
+    from: "PITACS Orders <orders@pitacs.pitx.uk>",
+    to: "customer2@example.com",
+    subject: "Order #2 Dispatched",
+    html: "<p>Your order #2 has been dispatched.</p>",
+  },
+]);
+
+if (data) {
+  for (const item of data.data) {
+    console.log(`Dispatched ${item.id} -> ${item.status} (${item.provider})`);
+  }
+}
+```
+
+### Read Receipts & Open Tracking
+
+Pitxmail automatically injects an invisible 1x1 tracking pixel into all outbound HTML emails. When recipient clients load images, Pitxmail logs the timestamp to Cloudflare D1 without revealing recipient IPs or user agents:
+
+```typescript
+const detail = await client.emails.get("pm_cf_1795604129010_x3lx39");
+if (detail.message.openedAt) {
+  console.log("Email opened at (UK time):", new Date(detail.message.openedAt).toLocaleString("en-GB"));
+} else {
+  console.log("Email has not yet been opened.");
 }
 ```
 

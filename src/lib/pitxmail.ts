@@ -33,6 +33,18 @@ export interface SendEmailResponse {
   created_at: string;
 }
 
+export interface BatchSendItem {
+  id: string;
+  object: "email";
+  status?: string;
+  provider?: string;
+  error?: string | null;
+}
+
+export interface BatchSendResponse {
+  data: BatchSendItem[];
+}
+
 export interface PitxmailError {
   message: string;
   code?: string;
@@ -66,6 +78,7 @@ export interface EmailListItem {
   retryCount: number;
   createdAt: number;
   updatedAt: number;
+  openedAt?: number | null;
 }
 
 export interface EmailListResponse {
@@ -254,6 +267,50 @@ export class Pitxmail {
         });
         if (!res.ok) throw new Error(`Failed to download EML: HTTP ${res.status}`);
         return res.text();
+      },
+
+      sendBatch: async (
+        payloads: SendEmailPayload[]
+      ): Promise<{ data: BatchSendResponse | null; error: PitxmailError | null }> => {
+        return this.batch.send(payloads);
+      },
+    };
+  }
+
+  get batch() {
+    return {
+      send: async (
+        payloads: SendEmailPayload[]
+      ): Promise<{ data: BatchSendResponse | null; error: PitxmailError | null }> => {
+        try {
+          const body = payloads.map((p) => ({
+            from: p.from,
+            to: Array.isArray(p.to) ? p.to : [p.to],
+            subject: p.subject,
+            html: p.html,
+            text: p.text,
+            cc: p.cc,
+            bcc: p.bcc,
+            replyTo: p.replyTo || p.reply_to,
+            tags: p.tags,
+            metadata: p.metadata,
+          }));
+
+          const data = await this.fetchJson<BatchSendResponse>("/api/v1/emails/batch", {
+            method: "POST",
+            body: JSON.stringify(body),
+          });
+
+          return { data, error: null };
+        } catch (err: any) {
+          return {
+            data: null,
+            error: {
+              message: err.message || "Batch dispatch failed",
+              details: err.details,
+            },
+          };
+        }
       },
     };
   }

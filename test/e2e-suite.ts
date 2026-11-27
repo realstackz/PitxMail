@@ -110,6 +110,62 @@ async function runTests() {
     }
   });
 
+  // Test 7: Batch Email Dispatch (Resend-compatible batch endpoint)
+  let testBatchId: string | null = null;
+  await test("POST /api/v1/emails/batch (Multi-item dispatch)", async () => {
+    const res = await fetch(`${BASE_URL}/api/v1/emails/batch`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${SESSION_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify([
+        {
+          from: "Pitacs Orders <orders@pitacs.pitx.uk>",
+          to: ["delivered@resend.dev"],
+          subject: "E2E Batch Item 1",
+          html: "<p>Batch email payload 1 for testing</p>",
+        },
+        {
+          from: "Pitacs Orders <orders@pitacs.pitx.uk>",
+          to: ["delivered@resend.dev"],
+          subject: "E2E Batch Item 2",
+          html: "<p>Batch email payload 2 for testing</p>",
+        },
+      ]),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+    const data = await res.json();
+    if (!Array.isArray(data.data) || data.data.length !== 2) {
+      throw new Error(`Expected data array with 2 items, got: ${JSON.stringify(data)}`);
+    }
+    if (!data.data[0].id) {
+      throw new Error("Missing ID in batch response item 1");
+    }
+    testBatchId = data.data[0].id;
+  });
+
+  // Test 8: Public Open Tracking Pixel (Read Receipt)
+  await test("GET /api/v1/track/open/:id (Transparent 1x1 GIF & opened_at)", async () => {
+    if (!testBatchId) throw new Error("Skipped: no batch ID from Test 7");
+    const pixelRes = await fetch(`${BASE_URL}/api/v1/track/open/${testBatchId}.png`);
+    if (!pixelRes.ok) throw new Error(`Pixel HTTP ${pixelRes.status}`);
+    const contentType = pixelRes.headers.get("content-type") || "";
+    if (!contentType.includes("image/gif")) {
+      throw new Error(`Expected Content-Type image/gif, got ${contentType}`);
+    }
+
+    // Verify opened_at updated in D1
+    const detailRes = await fetch(`${BASE_URL}/api/v1/emails/${testBatchId}`, {
+      headers: { Authorization: `Bearer ${SESSION_TOKEN}` },
+    });
+    if (!detailRes.ok) throw new Error(`Detail HTTP ${detailRes.status}`);
+    const detailData = await detailRes.json();
+    if (!detailData.message || typeof detailData.message.openedAt !== "number") {
+      throw new Error(`Expected openedAt timestamp number, got: ${JSON.stringify(detailData.message?.openedAt)}`);
+    }
+  });
+
   console.log(`\n======================================================`);
   console.log(`📊 Test Results: \x1b[32m${passed} Passed\x1b[0m, \x1b[31m${failed} Failed\x1b[0m`);
   console.log(`======================================================\n`);
