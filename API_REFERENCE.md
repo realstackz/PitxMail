@@ -28,7 +28,7 @@ Pitxmail is Pitacs' high-reliability transactional email infrastructure built on
 ## 2. Hybrid Failover Architecture
 
 Pitxmail implements intelligent multi-provider routing:
-1. **Primary Route (Resend)**: Outbound emails route through Resend up to your configured daily quota (~90-100 emails/day).
+1. **Primary Route (Resend)**: Outbound emails route through Resend up to your configured daily quota (99 emails/day).
 2. **Automatic Edge Failover (Cloudflare)**: When daily quota is exhausted, or upon receiving HTTP 429 / 5xx, Pitxmail automatically trips a circuit breaker and routes traffic to Cloudflare Email Sending.
 3. **Transparent Recovery**: At UTC midnight, the circuit breaker resets automatically.
 4. **Audit Trail**: Every hop is logged in Cloudflare D1 with timestamps, provider name, and error traces.

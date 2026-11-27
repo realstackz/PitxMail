@@ -39,7 +39,7 @@ async function dispatchWithFailover(
   attempts: DeliveryAttemptRecord[];
 }> {
   const attempts: DeliveryAttemptRecord[] = [];
-  const dailyLimit = Number(env.RESEND_DAILY_LIMIT || 90);
+  const dailyLimit = Number(env.RESEND_DAILY_LIMIT || 99);
   const monthlyLimit = Number(env.RESEND_MONTHLY_LIMIT || 2850);
 
   // 0. Pre-Flight Suppression Guard: block known bad/bounced recipients before touching mail servers
@@ -1147,7 +1147,7 @@ export default {
             volume24h: Number(last24h?.count || 0),
             resendConfigured: Boolean(env.RESEND_API_KEY),
             resendToday: Number(resendTodayRow?.count || 0),
-            resendDailyLimit: Number(env.RESEND_DAILY_LIMIT || 90),
+            resendDailyLimit: Number(env.RESEND_DAILY_LIMIT || 99),
             resendMonth: Number(resendMonthRow?.count || 0),
             resendMonthlyLimit: Number(env.RESEND_MONTHLY_LIMIT || 2850),
             resendPausedUntil,

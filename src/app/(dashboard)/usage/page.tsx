@@ -180,7 +180,7 @@ export default function ApiUsagePage() {
             <ShieldCheck className="w-4 h-4 text-purple-400" />
           </div>
           <div className="text-2xl font-bold text-white">
-            {stats.resendToday ?? 0} <span className="text-sm font-normal text-slate-400">/ {stats.resendDailyLimit ?? 95}</span>
+            {stats.resendToday ?? 0} <span className="text-sm font-normal text-slate-400">/ {stats.resendDailyLimit ?? 99}</span>
           </div>
           <p className="text-[11px] text-purple-300">Auto-failover to Cloudflare after cap</p>
         </div>
@@ -293,7 +293,7 @@ export default function ApiUsagePage() {
           <span>Hybrid Edge Infrastructure</span>
         </h3>
         <p className="text-xs text-slate-300 leading-relaxed">
-          Pitxmail dispatches via <strong>Resend</strong> first (up to {stats.resendDailyLimit ?? 95}/day) and automatically fails over to <strong>Cloudflare Email Sending</strong> when the daily quota is reached or on any upstream error. All delivery attempts and logs are immediately queryable in D1.
+          Pitxmail dispatches via <strong>Resend</strong> first (up to {stats.resendDailyLimit ?? 99}/day) and automatically fails over to <strong>Cloudflare Email Sending</strong> when the daily quota is reached or on any upstream error. All delivery attempts and logs are immediately queryable in D1.
         </p>
       </div>
     </div>

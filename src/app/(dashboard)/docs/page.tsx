@@ -37,7 +37,7 @@ Live API Key: pm_live_YOUR_API_KEY
 Allowed Sender Domains: @pitx.uk (e.g., orders@pitx.uk) and @pitacs.pitx.uk (e.g., noreply@pitacs.pitx.uk)
 
 Features & Architecture:
-- Hybrid Routing: Automatically routes the first ~95 emails/day via Resend for high inbox placement, then auto-fails over to Cloudflare Email Sending if daily limits or errors occur.
+- Hybrid Routing: Automatically routes the first ~99 emails/day via Resend for high inbox placement, then auto-fails over to Cloudflare Email Sending if daily limits or errors occur.
 - Resend Drop-In Replacement: Compatible with existing Resend client calls.
 
 1. Send Email:
@@ -283,7 +283,7 @@ func SendEmail(to string, subject string, html string) error {
             <span>Hybrid Auto-Failover</span>
           </div>
           <p className="text-xs text-slate-300 leading-relaxed">
-            Routes up to <strong>90-100 emails/day</strong> via <strong>Resend</strong> for high inbox reputation, then seamlessly overflows to <strong>Cloudflare Email Sending</strong> when daily limits are reached.
+            Routes up to <strong>99 emails/day</strong> via <strong>Resend</strong> for high inbox reputation, then seamlessly overflows to <strong>Cloudflare Email Sending</strong> when daily limits are reached.
           </p>
         </div>
 

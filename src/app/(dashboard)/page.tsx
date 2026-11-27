@@ -88,7 +88,7 @@ export default function OverviewPage() {
           deliveryRate: statsJson.deliveryRate || "100.0%",
           volume24h: statsJson.volume24h ?? 0,
           resendToday: statsJson.resendToday ?? 0,
-          resendDailyLimit: statsJson.resendDailyLimit ?? 95,
+          resendDailyLimit: statsJson.resendDailyLimit ?? 99,
           resendMonth: statsJson.resendMonth ?? 0,
           resendMonthlyLimit: statsJson.resendMonthlyLimit ?? 3000,
           resendIsPaused: statsJson.resendIsPaused ?? false,
