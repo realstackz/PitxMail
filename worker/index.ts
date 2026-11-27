@@ -1272,11 +1272,27 @@ export default {
           queryDns(domainRecord.domain, "MX"),
         ]);
 
-        const spfOk = txtRecords.some((r) => r.toLowerCase().includes("v=spf1"));
-        const dmarcOk = dmarcRecords.some((r) => r.toLowerCase().includes("v=dmarc1"));
-        const mxOk = mxRecords.length > 0;
-        const dkimOk = domainRecord.domain === "pitx.uk" ? true : spfOk && dmarcOk;
-        const overall = spfOk && mxOk ? "verified" : "pending";
+        let spfOk = txtRecords.some((r) => r.toLowerCase().includes("v=spf1"));
+        let dmarcOk = dmarcRecords.some((r) => r.toLowerCase().includes("v=dmarc1"));
+        let mxOk = mxRecords.length > 0;
+
+        // Subdomain inheritance: if a subdomain (e.g. pitacs.pitx.uk) lacks direct records,
+        // check parent zone (pitx.uk) since Cloudflare Email Sending covers the entire zone
+        const parts = domainRecord.domain.split(".");
+        if ((!spfOk || !mxOk || !dmarcOk) && parts.length > 2) {
+          const parentDomain = parts.slice(1).join(".");
+          const [parentTxt, parentDmarc, parentMx] = await Promise.all([
+            queryDns(parentDomain, "TXT"),
+            queryDns(`_dmarc.${parentDomain}`, "TXT"),
+            queryDns(parentDomain, "MX"),
+          ]);
+          if (!spfOk) spfOk = parentTxt.some((r) => r.toLowerCase().includes("v=spf1"));
+          if (!dmarcOk) dmarcOk = parentDmarc.some((r) => r.toLowerCase().includes("v=dmarc1"));
+          if (!mxOk) mxOk = parentMx.length > 0;
+        }
+
+        const dkimOk = domainRecord.domain === "pitx.uk" || domainRecord.domain.endsWith(".pitx.uk") ? true : spfOk && dmarcOk;
+        const overall = spfOk && (mxOk || dmarcOk) ? "verified" : "pending";
 
         await env.DB.prepare(
           "UPDATE domains SET verification_status = ?, dkim_status = ?, spf_status = ?, dmarc_status = ?, mx_status = ? WHERE id = ?"
